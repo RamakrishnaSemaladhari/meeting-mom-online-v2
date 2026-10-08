@@ -1,6 +1,7 @@
-import argparse,json,os,textwrap,requests
+import argparse,json,os,textwrap,requests,sys
 from pathlib import Path
-from src.drive import DriveClient
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from drive import DriveClient
 def ollama(prompt,model):
  r=requests.post("http://127.0.0.1:11434/api/generate",json={"model":model,"prompt":prompt,"stream":False,"options":{"temperature":0.15,"num_ctx":32768}},timeout=900);r.raise_for_status();return r.json()["response"].strip()
 def main():
