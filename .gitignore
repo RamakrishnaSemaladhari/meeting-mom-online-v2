@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+workspace/
+output/
+chunks/
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.flac
