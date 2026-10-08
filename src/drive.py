@@ -19,6 +19,12 @@ class DriveClient:
     for b in r.iter_content(1024*1024):
      if b:f.write(b)
   return meta
+ def create_folder(self,name,parent_id):
+  meta={"name":name,"mimeType":"application/vnd.google-apps.folder"}
+  if parent_id:meta["parents"]=[parent_id]
+  r=requests.post(f"{DRIVE}/files",headers={**self.headers(),"Content-Type":"application/json"},json=meta,timeout=60);r.raise_for_status();return r.json()
+ def delete(self,file_id):
+  r=requests.delete(f"{DRIVE}/files/{file_id}",headers=self.headers(),timeout=60);r.raise_for_status()
  def upload(self,path,name,parent_id,mime):
   meta={"name":name}
   if parent_id:meta["parents"]=[parent_id]
