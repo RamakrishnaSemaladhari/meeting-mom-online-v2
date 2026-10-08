@@ -251,7 +251,12 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
           OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python src/finalize.py --payload prepared/payload.json --out result
       - name: Notify Control Tower — finalization complete
         env:
