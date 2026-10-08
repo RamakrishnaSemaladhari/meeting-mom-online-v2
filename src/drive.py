@@ -26,8 +26,13 @@ class DriveClient:
  def delete(self,file_id):
   r=requests.delete(f"{DRIVE}/files/{file_id}",headers=self.headers(),timeout=60);r.raise_for_status()
  def upload(self,path,name,parent_id,mime):
+  import uuid
+  boundary="mmv2-"+uuid.uuid4().hex
   meta={"name":name}
   if parent_id:meta["parents"]=[parent_id]
-  with open(path,"rb") as f:
-   r=requests.post(UPLOAD,params={"uploadType":"multipart"},headers=self.headers(),files={"metadata":("metadata.json",json.dumps(meta),"application/json; charset=UTF-8"),"file":(name,f,mime)},timeout=300)
-  r.raise_for_status();return r.json()
+  data=open(path,"rb").read()
+  body=(f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+        +json.dumps(meta)+"\r\n"
+        +f"--{boundary}\r\nContent-Type: {mime}\r\n\r\n").encode()+data+(f"\r\n--{boundary}--\r\n").encode()
+  h={**self.headers(),"Content-Type":f"multipart/related; boundary={boundary}"}
+  r=requests.post(UPLOAD,params={"uploadType":"multipart"},headers=h,data=body,timeout=300);r.raise_for_status();return r.json()
