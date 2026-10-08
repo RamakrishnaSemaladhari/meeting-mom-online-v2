@@ -45,6 +45,22 @@ jobs:
               raise SystemExit("meeting_id and audio_file_id are required")
           open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
           PY
+      - name: Notify Control Tower — queued
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":os.environ.get("MEETING_ID",""),"event":"WORKFLOW_STARTED","stage":"PREPARE","progress_percent":8,"status":"PROCESSING","message":"GitHub Actions workflow started."}
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
+          PY
       - name: Download source audio from Drive
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -62,6 +78,23 @@ jobs:
           p["chunk_folder_id"]=temp["id"]
           open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
           PY
+      - name: Notify Control Tower — audio downloaded
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":os.environ.get("MEETING_ID",""),"event":"AUDIO_DOWNLOADED","stage":"AUDIO_PREPARATION","progress_percent":15,"status":"PROCESSING","message":"Source audio downloaded from Google Drive."}
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
+          PY
+
       - name: Split into approximately 10-minute chunks
         run: |
           mkdir -p chunks
@@ -86,6 +119,23 @@ jobs:
           open("matrix.json","w").write(json.dumps({"include":items},separators=(",",":")))
           PY
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+      - name: Notify Control Tower — chunks prepared
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          p=json.load(open("payload.json"))
+          p.update({"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"event":"CHUNKS_PREPARED","stage":"CHUNK_PREPARATION","progress_percent":25,"status":"PROCESSING","message":"Audio split and temporary chunks uploaded.","chunk_count":len(p.get("chunk_file_ids",[]))})
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: prepared-${{ github.run_id }}
@@ -118,6 +168,23 @@ jobs:
           import os
           from src.drive import DriveClient
           DriveClient().download(os.environ["CHUNK_ID"],"chunk.m4a")
+          PY
+      - name: Notify Control Tower — chunk processing
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+          CHUNK_INDEX: ${{ matrix.index }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":os.environ.get("MEETING_ID",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper processing started for chunk "+os.environ.get("CHUNK_INDEX","")}
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
           PY
       - name: Process chunk
         env:
@@ -155,6 +222,23 @@ jobs:
           pattern: chunk-*-${{ github.run_id }}
           path: result
           merge-multiple: true
+      - name: Notify Control Tower — chunks completed
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":os.environ.get("MEETING_ID",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All Whisper chunk jobs completed. Starting finalization."}
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
+          PY
+
       - name: Install Ollama
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
@@ -169,6 +253,23 @@ jobs:
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
           OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
         run: python src/finalize.py --payload prepared/payload.json --out result
+      - name: Notify Control Tower — finalization complete
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":os.environ.get("MEETING_ID",""),"event":"FINALIZATION_COMPLETE","stage":"FINALIZATION","progress_percent":95,"status":"PROCESSING","message":"Final MoM generation and Drive upload completed."}
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: meeting-mom-v2-output-${{ github.run_id }}
@@ -183,8 +284,16 @@ jobs:
       - name: Report failure
         env:
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
           MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
         run: |
-          if [ -n "$MMV2_GATEWAY_URL" ] && [ -n "$MEETING_ID" ]; then
-            curl -fsS -G "$MMV2_GATEWAY_URL"               --data-urlencode "action=dispatch_failure_reporting"               --data-urlencode "meeting_id=$MEETING_ID"               --data-urlencode "error_code=GITHUB_PROCESSING_FAILED"               --data-urlencode "error_message=One or more V2 processing stages failed." >/dev/null || true
-          fi
+          python - <<'PY'
+          import json, os, urllib.request
+          p={"action":"fail_meeting","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":os.environ.get("MEETING_ID",""),"error_code":"GITHUB_PROCESSING_FAILED","error_message":"One or more V2 processing stages failed."}
+          url=os.environ.get("MMV2_GATEWAY_URL","")
+          if url and p["meeting_id"]:
+              try:
+                  req=urllib.request.Request(url,data=json.dumps(p).encode(),headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req,timeout=20).read()
+              except Exception as e: print("callback warning:",e)
+          PY
