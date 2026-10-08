@@ -33,6 +33,20 @@ MEETING SUMMARY:
   try:d.delete(p["chunk_folder_id"])
   except Exception:pass
  g=os.getenv("MMV2_GATEWAY_URL","").strip()
- if g:requests.get(g,params={"action":"registry_complete","meeting_id":p["meeting_id"]},timeout=60).raise_for_status()
+ if g:
+  callback={
+   "action":"complete_meeting",
+   "callback_secret":os.getenv("MMV2_CALLBACK_SECRET",""),
+   "meeting_id":p["meeting_id"],
+   "transcript_file_id":ids.get("transcript.txt",""),
+   "translation_file_id":ids.get("translation_en.txt",""),
+   "summary_file_id":ids.get("summary.txt",""),
+   "mom_file_id":ids.get("mom.txt",""),
+   "manifest_file_id":ids.get("manifest.json",""),
+   "github_run_id":os.getenv("GITHUB_RUN_ID",""),
+   "github_run_number":os.getenv("GITHUB_RUN_NUMBER",""),
+   "github_run_url":os.getenv("GITHUB_SERVER_URL","")+"/"+os.getenv("GITHUB_REPOSITORY","")+"/actions/runs/"+os.getenv("GITHUB_RUN_ID","")
+  }
+  requests.post(g,json=callback,timeout=60).raise_for_status()
  print(json.dumps({"success":True,"meeting_id":p["meeting_id"],"uploaded":ids}))
 if __name__=="__main__":main()
