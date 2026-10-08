@@ -1,0 +1,83 @@
+name: V2 Connection Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-connections:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Test Google OAuth and Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os, requests
+
+          required = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"]
+          missing = [k for k in required if not os.environ.get(k)]
+          if missing:
+              raise SystemExit("Missing GitHub secrets: " + ", ".join(missing))
+
+          r = requests.post(
+              "https://oauth2.googleapis.com/token",
+              data={
+                  "client_id": os.environ["GOOGLE_CLIENT_ID"],
+                  "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+                  "refresh_token": os.environ["GOOGLE_REFRESH_TOKEN"],
+                  "grant_type": "refresh_token",
+              },
+              timeout=60,
+          )
+          if not r.ok:
+              raise SystemExit(f"Google token exchange failed: HTTP {r.status_code}: {r.text[:500]}")
+
+          token = r.json().get("access_token")
+          if not token:
+              raise SystemExit("Google token exchange returned no access token.")
+
+          d = requests.get(
+              "https://www.googleapis.com/drive/v3/files",
+              params={"pageSize": 1, "fields": "files(id,name,mimeType)"},
+              headers={"Authorization": "Bearer " + token},
+              timeout=60,
+          )
+          if not d.ok:
+              raise SystemExit(f"Google Drive API test failed: HTTP {d.status_code}: {d.text[:500]}")
+
+          files = d.json().get("files", [])
+          print("GOOGLE_OAUTH: PASS")
+          print("GOOGLE_DRIVE_API: PASS")
+          print("Drive API returned successfully; file count sample:", len(files))
+          PY
+
+      - name: Test Apps Script gateway
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+        run: |
+          if [ -z "$MMV2_GATEWAY_URL" ]; then
+            echo "MMV2_GATEWAY_URL is missing."
+            exit 1
+          fi
+          python - <<'PY'
+          import os, requests
+
+          url = os.environ["MMV2_GATEWAY_URL"]
+          r = requests.get(url, params={"action": "health"}, timeout=60)
+          if not r.ok:
+              raise SystemExit(f"Gateway health request failed: HTTP {r.status_code}: {r.text[:500]}")
+
+          data = r.json()
+          if not data.get("success") or data.get("status") != "OK":
+              raise SystemExit("Gateway health returned an unexpected response.")
+
+          print("APPS_SCRIPT_GATEWAY: PASS")
+          print("Gateway status:", data.get("status"))
+          print("Gateway version:", data.get("version"))
+          PY
