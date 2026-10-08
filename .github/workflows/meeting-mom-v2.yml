@@ -54,31 +54,42 @@ jobs:
           python - <<'PY'
           import json
           from src.drive import DriveClient
-          p=json.load(open("payload.json"))
-          meta=DriveClient().download(p["audio_file_id"],"source_audio")
+          p=json.load(open("payload.json")); d=DriveClient()
+          meta=d.download(p["audio_file_id"],"source_audio")
           p["audio_name"]=meta.get("name","meeting_audio")
+          parent=p.get("meeting_folder_id") or p.get("audio_folder_id")
+          temp=d.create_folder("MMV2-TEMP-"+p["meeting_id"],parent)
+          p["chunk_folder_id"]=temp["id"]
           open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
           PY
       - name: Split into approximately 10-minute chunks
         run: |
           mkdir -p chunks
-          ffmpeg -hide_banner -loglevel error -i source_audio -f segment -segment_time 600 -reset_timestamps 1 -c copy chunks/chunk_%04d.m4a
+          ffmpeg -hide_banner -loglevel error -i source_audio -f segment -segment_time 600 -reset_timestamps 1 -c:a aac -b:a 64k chunks/chunk_%04d.m4a
           test "$(find chunks -name 'chunk_*.m4a' | wc -l)" -gt 0
-      - name: Create dynamic chunk matrix
+      - name: Upload temporary chunks to Drive and create matrix
         id: matrix
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
         run: |
           python - <<'PY'
-          import json,glob
-          items=[{"index":i,"file":f"chunk_{i:04d}.m4a"} for i,f in enumerate(sorted(glob.glob("chunks/chunk_*.m4a")))]
+          import json,glob,os
+          from src.drive import DriveClient
+          p=json.load(open("payload.json")); d=DriveClient(); items=[]
+          for i,f in enumerate(sorted(glob.glob("chunks/chunk_*.m4a"))):
+              meta=d.upload(f,f"MMV2-{p['meeting_id']}-chunk-{i:04d}.m4a",p["chunk_folder_id"],"audio/mp4")
+              items.append({"index":i,"file_id":meta["id"]})
+          p["chunk_file_ids"]=[x["file_id"] for x in items]
+          open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
           open("matrix.json","w").write(json.dumps({"include":items},separators=(",",":")))
           PY
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: prepared-${{ github.run_id }}
-          path: |
-            payload.json
-            chunks/
+          path: payload.json
           retention-days: 1
 
   process-chunks:
@@ -96,18 +107,25 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Download prepared chunks
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-${{ github.run_id }}
-          path: prepared
+      - name: Download this 10-minute chunk from Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          CHUNK_ID: ${{ matrix.file_id }}
+        run: |
+          python - <<'PY'
+          import os
+          from src.drive import DriveClient
+          DriveClient().download(os.environ["CHUNK_ID"],"chunk.m4a")
+          PY
       - name: Process chunk
         env:
           WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'small' }}
           WHISPER_COMPUTE: int8
         run: |
           mkdir -p result
-          python src/processor.py --audio "prepared/chunks/${{ matrix.file }}" --index "${{ matrix.index }}" --out result
+          python src/processor.py --audio chunk.m4a --index "${{ matrix.index }}" --out result
       - uses: actions/upload-artifact@v4
         with:
           name: chunk-${{ matrix.index }}-${{ github.run_id }}
@@ -143,7 +161,7 @@ jobs:
           nohup ollama serve >/tmp/ollama.log 2>&1 &
           for i in $(seq 1 30); do ollama list >/dev/null 2>&1 && break; sleep 2; done
           ollama pull "${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}"
-      - name: Synthesize and upload
+      - name: Synthesize, upload and clean temporary chunks
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
