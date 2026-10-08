@@ -1,0 +1,172 @@
+name: Meeting MoM Online V2
+
+on:
+  repository_dispatch:
+    types: [meeting-ready]
+  workflow_dispatch:
+    inputs:
+      payload_json:
+        description: "Optional test payload JSON"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meeting-mom-v2-${{ github.event.client_payload.meeting_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install system tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Build payload
+        env:
+          EVENT_PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          MANUAL_PAYLOAD: ${{ inputs.payload_json }}
+        run: |
+          python - <<'PY'
+          import json,os
+          raw=os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}"
+          p=json.loads(raw)
+          if not p.get("meeting_id") or not p.get("audio_file_id"):
+              raise SystemExit("meeting_id and audio_file_id are required")
+          open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
+          PY
+      - name: Download source audio from Drive
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json
+          from src.drive import DriveClient
+          p=json.load(open("payload.json"))
+          meta=DriveClient().download(p["audio_file_id"],"source_audio")
+          p["audio_name"]=meta.get("name","meeting_audio")
+          open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
+          PY
+      - name: Split into approximately 10-minute chunks
+        run: |
+          mkdir -p chunks
+          ffmpeg -hide_banner -loglevel error -i source_audio -f segment -segment_time 600 -reset_timestamps 1 -c copy chunks/chunk_%04d.m4a
+          test "$(find chunks -name 'chunk_*.m4a' | wc -l)" -gt 0
+      - name: Create dynamic chunk matrix
+        id: matrix
+        run: |
+          python - <<'PY'
+          import json,glob
+          items=[{"index":i,"file":f"chunk_{i:04d}.m4a"} for i,f in enumerate(sorted(glob.glob("chunks/chunk_*.m4a")))]
+          open("matrix.json","w").write(json.dumps({"include":items},separators=(",",":")))
+          PY
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-${{ github.run_id }}
+          path: |
+            payload.json
+            chunks/
+          retention-days: 1
+
+  process-chunks:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download prepared chunks
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-${{ github.run_id }}
+          path: prepared
+      - name: Process chunk
+        env:
+          WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'small' }}
+          WHISPER_COMPUTE: int8
+        run: |
+          mkdir -p result
+          python src/processor.py --audio "prepared/chunks/${{ matrix.file }}" --index "${{ matrix.index }}" --out result
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.index }}-${{ github.run_id }}
+          path: result/
+          retention-days: 1
+
+  finalize:
+    needs: [prepare, process-chunks]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.process-chunks.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download prepared payload
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-${{ github.run_id }}
+          path: prepared
+      - name: Download all chunk results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*-${{ github.run_id }}
+          path: result
+          merge-multiple: true
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do ollama list >/dev/null 2>&1 && break; sleep 2; done
+          ollama pull "${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}"
+      - name: Synthesize and upload
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
+        run: python src/finalize.py --payload prepared/payload.json --out result
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meeting-mom-v2-output-${{ github.run_id }}
+          path: result/
+          retention-days: 1
+
+  report-failure:
+    needs: [prepare, process-chunks, finalize]
+    if: ${{ always() && (needs.prepare.result == 'failure' || needs.process-chunks.result == 'failure' || needs.finalize.result == 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report failure
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MEETING_ID: ${{ github.event.client_payload.meeting_id || '' }}
+        run: |
+          if [ -n "$MMV2_GATEWAY_URL" ] && [ -n "$MEETING_ID" ]; then
+            curl -fsS -G "$MMV2_GATEWAY_URL"               --data-urlencode "action=dispatch_failure_reporting"               --data-urlencode "meeting_id=$MEETING_ID"               --data-urlencode "error_code=GITHUB_PROCESSING_FAILED"               --data-urlencode "error_message=One or more V2 processing stages failed." >/dev/null || true
+          fi
