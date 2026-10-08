@@ -26,6 +26,12 @@ MEETING SUMMARY:
  (o/"manifest.json").write_text(json.dumps({"meeting_id":p["meeting_id"],"meeting_title":title,"chunk_count":len(list(o.glob("chunk_*_summary.txt"))),"outputs":["transcript.txt","translation_en.txt","summary.txt","mom.txt"]},ensure_ascii=False,indent=2),encoding="utf-8")
  d=DriveClient();parent=p.get("meeting_folder_id") or p.get("audio_folder_id");ids={}
  for n,mime in [("transcript.txt","text/plain"),("translation_en.txt","text/plain"),("summary.txt","text/plain"),("mom.txt","text/plain"),("manifest.json","application/json")]:ids[n]=d.upload(o/n,f"{title} - {n}",parent,mime).get("id")
+ for chunk_id in p.get("chunk_file_ids",[]):
+  try:d.delete(chunk_id)
+  except Exception:pass
+ if p.get("chunk_folder_id"):
+  try:d.delete(p["chunk_folder_id"])
+  except Exception:pass
  g=os.getenv("MMV2_GATEWAY_URL","").strip()
  if g:requests.get(g,params={"action":"registry_complete","meeting_id":p["meeting_id"]},timeout=60).raise_for_status()
  print(json.dumps({"success":True,"meeting_id":p["meeting_id"],"uploaded":ids}))
