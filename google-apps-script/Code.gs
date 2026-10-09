@@ -948,7 +948,7 @@ function health_() {
   return {
     success:true,service:'Meeting MoM Online V2 Private Control Tower',
     status:'OK',version:V2.VERSION,
-    spreadsheet_id:spreadsheetId_(),
+    spreadsheet_configured:!!PropertiesService.getScriptProperties().getProperty(V2.SPREADSHEET_ID_PROPERTY),
     github_repo:V2.REPO,
     workflow:V2.WORKFLOW_FILE,
     capabilities:[
