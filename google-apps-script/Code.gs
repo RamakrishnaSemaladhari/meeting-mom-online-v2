@@ -19,14 +19,13 @@
  * 4. Deploy the Web App as: Execute as ME; access only your authorised users.
  *
  * V2 IDs
- * Registry spreadsheet: 1xvaJXu4G-K7rP6IGdgOQVqdyL314pp8RwtvK6dtzQ44
  * GitHub repo: RamakrishnaSemaladhari/meeting-mom-online-v2
  */
 
 const V2 = {
   VERSION: 'meeting-mom-online-v2-control-tower-2026-10-08',
   TIMEZONE: 'Asia/Kolkata',
-  SPREADSHEET_ID: '1xvaJXu4G-K7rP6IGdgOQVqdyL314pp8RwtvK6dtzQ44',
+  SPREADSHEET_ID_PROPERTY: 'MMV2_SPREADSHEET_ID',
   REPO: 'RamakrishnaSemaladhari/meeting-mom-online-v2',
   WORKFLOW_FILE: 'meeting-mom-v2.yml',
   WORKFLOW_REF: 'main',
@@ -164,7 +163,7 @@ function doPost(e) {
  * ========================= */
 
 function SETUP_V2() {
-  const ss = SpreadsheetApp.openById(V2.SPREADSHEET_ID);
+  const ss = SpreadsheetApp.openById(spreadsheetId_());
 
   ensureSheet_(ss, SHEETS.MEETINGS, MEETING_HEADERS);
   ensureSheet_(ss, SHEETS.EVENTS, EVENT_HEADERS);
@@ -180,7 +179,7 @@ function SETUP_V2() {
   const processing = getOrCreateChildFolder_(root, V2.PROCESSING_FOLDER_PROPERTY, 'Processing');
 
   writeConfig_('VERSION', V2.VERSION, false);
-  writeConfig_('SPREADSHEET_ID', V2.SPREADSHEET_ID, false);
+  writeConfig_('SPREADSHEET_ID', spreadsheetId_(), false);
   writeConfig_('GITHUB_REPO', V2.REPO, false);
   writeConfig_('WORKFLOW_FILE', V2.WORKFLOW_FILE, false);
   writeConfig_('WORKFLOW_REF', V2.WORKFLOW_REF, false);
@@ -306,7 +305,7 @@ function githubSetupPackage_() {
     },
     apps_script:{
       version:V2.VERSION,
-      spreadsheet_id:V2.SPREADSHEET_ID,
+      spreadsheet_configured:!!PropertiesService.getScriptProperties().getProperty(V2.SPREADSHEET_ID_PROPERTY),
       gateway_url:'PASTE_YOUR_NEW_APPS_SCRIPT_EXEC_URL_HERE',
       callback_secret_property:V2.CALLBACK_SECRET_PROPERTY
     },
@@ -386,7 +385,7 @@ function dashboard_() {
  * ========================= */
 
 function createMeeting_(d) {
-  const ss = SpreadsheetApp.openById(V2.SPREADSHEET_ID);
+  const ss = SpreadsheetApp.openById(spreadsheetId_());
   const sheet = ss.getSheetByName(SHEETS.MEETINGS);
   const meetingId = clean_(d.meeting_id) || generateMeetingId_();
   const existing = findRow_(sheet, 'Meeting ID', meetingId);
@@ -482,7 +481,7 @@ function uploadAndStartMeeting(form) {
   const size = file.getSize();
   const mime = file.getMimeType() || blob.getContentType() || 'application/octet-stream';
 
-  const ss = SpreadsheetApp.openById(V2.SPREADSHEET_ID);
+  const ss = SpreadsheetApp.openById(spreadsheetId_());
   const sheet = ss.getSheetByName(SHEETS.MEETINGS);
   const rowNo = findRow_(sheet, 'Meeting ID', meetingId);
   setByHeader_(sheet, MEETING_HEADERS, rowNo, 'Audio File ID', file.getId());
@@ -531,7 +530,7 @@ function startProcessing_(d) {
   const meetingId=clean_(d.meeting_id);
   if(!meetingId) throw new Error('meeting_id is required');
 
-  const sheet=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  const sheet=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
   let rowNo=findRow_(sheet,'Meeting ID',meetingId);
   if(rowNo<2) {
     createMeeting_(d);
@@ -561,7 +560,7 @@ function startProcessing_(d) {
     meeting_folder_id:meetingFolderId,
     processing_folder_id:row['Processing Folder ID'],
     reports_folder_id:row['Reports Folder ID'],
-    registry_spreadsheet_id:V2.SPREADSHEET_ID,
+    registry_spreadsheet_id:spreadsheetId_(),
     registry_sheet:SHEETS.MEETINGS,
     processing_mode:clean_(d.processing_mode)||'fresh',
     meeting_title:clean_(d.meeting_title)||row['Meeting Title']||'Meeting',
@@ -601,7 +600,7 @@ function processingEvent_(d) {
   const meetingId=clean_(d.meeting_id);
   if(!meetingId) throw new Error('meeting_id is required');
 
-  const sheet=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  const sheet=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
   const rowNo=findRow_(sheet,'Meeting ID',meetingId);
   if(rowNo<2) throw new Error('Meeting not found: '+meetingId);
 
@@ -634,7 +633,7 @@ function processingEvent_(d) {
 
 function completeMeeting_(d) {
   const meetingId=clean_(d.meeting_id);
-  const sheet=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  const sheet=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
   const rowNo=findRow_(sheet,'Meeting ID',meetingId);
   if(rowNo<2) throw new Error('Meeting not found.');
 
@@ -669,7 +668,7 @@ function completeMeeting_(d) {
 
 function failMeeting_(d) {
   const meetingId=clean_(d.meeting_id);
-  const sheet=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  const sheet=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
   const rowNo=findRow_(sheet,'Meeting ID',meetingId);
   if(rowNo<2) throw new Error('Meeting not found.');
   setByHeader_(sheet,MEETING_HEADERS,rowNo,'Status',clean_(d.status)||'FAILED');
@@ -689,7 +688,7 @@ function updateReport_(d) {
   const content=String(d.content||'');
   if(!meetingId || !content) throw new Error('meeting_id and content are required');
 
-  const sheet=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  const sheet=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
   const rowNo=findRow_(sheet,'Meeting ID',meetingId);
   if(rowNo<2) throw new Error('Meeting not found.');
 
@@ -718,7 +717,7 @@ function updateReport_(d) {
 }
 
 function recordChunk_(d) {
-  const ss=SpreadsheetApp.openById(V2.SPREADSHEET_ID);
+  const ss=SpreadsheetApp.openById(spreadsheetId_());
   const sheet=ss.getSheetByName(SHEETS.CHUNKS);
   const meetingId=clean_(d.meeting_id);
   const chunkNo=num_(d.chunk_no);
@@ -904,7 +903,7 @@ function getMeeting(id) { return getMeeting_(id); }
 function getMeeting_(id) {
   id=clean_(id);
   if(!id) return {success:false,error:'MEETING_ID_REQUIRED'};
-  const sheet=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  const sheet=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
   const row=findRow_(sheet,'Meeting ID',id);
   if(row<2) return {success:false,error:'NOT_FOUND',meeting_id:id};
   return {success:true,meeting:publicMeeting_(getObjectAtRow_(sheet,MEETING_HEADERS,row))};
@@ -934,7 +933,7 @@ function publicMeeting_(m) {
 }
 
 function setupStatus_() {
-  const ss=SpreadsheetApp.openById(V2.SPREADSHEET_ID);
+  const ss=SpreadsheetApp.openById(spreadsheetId_());
   return {
     success:true,
     spreadsheet_exists:true,
@@ -949,7 +948,7 @@ function health_() {
   return {
     success:true,service:'Meeting MoM Online V2 Private Control Tower',
     status:'OK',version:V2.VERSION,
-    spreadsheet_id:V2.SPREADSHEET_ID,
+    spreadsheet_id:spreadsheetId_(),
     github_repo:V2.REPO,
     workflow:V2.WORKFLOW_FILE,
     capabilities:[
@@ -962,7 +961,13 @@ function health_() {
 }
 
 function getRegistrySheet_() {
-  return SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.MEETINGS);
+  return SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.MEETINGS);
+}
+
+function spreadsheetId_() {
+  const id = PropertiesService.getScriptProperties().getProperty(V2.SPREADSHEET_ID_PROPERTY);
+  if (!id) throw new Error('Missing Script Property MMV2_SPREADSHEET_ID. Add the registry spreadsheet ID in Project Settings > Script properties.');
+  return id.trim();
 }
 
 function ensureSheet_(ss,name,headers) {
@@ -982,7 +987,7 @@ function ensureSheet_(ss,name,headers) {
 }
 
 function formatAllSheets_() {
-  const ss=SpreadsheetApp.openById(V2.SPREADSHEET_ID);
+  const ss=SpreadsheetApp.openById(spreadsheetId_());
   Object.keys(SHEETS).forEach(function(k){
     const sh=ss.getSheetByName(SHEETS[k]);
     if(!sh)return;
@@ -1017,14 +1022,14 @@ function getObjectAtRow_(sheet,headers,row) {
 }
 
 function readObjects_(sheetName,headers) {
-  const sh=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(sheetName);
+  const sh=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(sheetName);
   if(!sh || sh.getLastRow()<2) return [];
   const values=sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues();
   return values.map(function(r){const o={};headers.forEach(function(h,i){o[h]=r[i];});return o;});
 }
 
 function writeObjects_(sheetName,headers,objects) {
-  const sh=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(sheetName);
+  const sh=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(sheetName);
   const last=sh.getLastRow();
   if(last>1) sh.getRange(2,1,last-1,Math.max(sh.getLastColumn(),headers.length)).clearContent();
   if(objects.length) sh.getRange(2,1,objects.length,headers.length).setValues(objects.map(function(o){return headers.map(function(h){return o[h]===undefined?'':o[h];});}));
@@ -1040,7 +1045,7 @@ function findRow_(sheet,header,value) {
 }
 
 function logEvent_(meetingId,event,stage,pct,eta,message,status,runId,metadata) {
-  const sh=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.EVENTS);
+  const sh=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.EVENTS);
   const o={
     'Event ID':Utilities.getUuid(),
     'Timestamp':new Date(),'Meeting ID':meetingId,
@@ -1058,7 +1063,7 @@ function logEvent_(meetingId,event,stage,pct,eta,message,status,runId,metadata) 
 }
 
 function writeConfig_(key,value,sensitive) {
-  const sh=SpreadsheetApp.openById(V2.SPREADSHEET_ID).getSheetByName(SHEETS.CONFIG);
+  const sh=SpreadsheetApp.openById(spreadsheetId_()).getSheetByName(SHEETS.CONFIG);
   const row=findRow_(sh,'Key',key);
   const values=[key,sensitive?'[STORED AS SCRIPT PROPERTY]':value,sensitive?'YES':'NO',new Date()];
   if(row>1) sh.getRange(row,1,1,4).setValues([values]); else sh.appendRow(values);
