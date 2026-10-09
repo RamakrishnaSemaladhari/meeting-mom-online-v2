@@ -229,21 +229,12 @@ function SETUP_V2() {
  */
 
 function SET_GITHUB_TOKEN() {
-  throw new Error(
-    'For security, run SET_GITHUB_TOKEN_VALUE(token) from the Apps Script editor after replacing TOKEN with your GitHub PAT. The function stores it and returns only status.'
-  );
-}
-
-function setGitHubToken_(token) {
-  token = String(token || '').trim();
-  if (!token) throw new Error('GitHub token is empty.');
-  if (token.length < 20) throw new Error('GitHub token appears too short.');
-  PropertiesService.getScriptProperties().setProperty(V2.GITHUB_TOKEN_PROPERTY, token);
+  const configured = !!PropertiesService.getScriptProperties().getProperty(V2.GITHUB_TOKEN_PROPERTY);
   return {
-    success:true,
-    stored:true,
+    success:configured,
+    configured:configured,
     property:V2.GITHUB_TOKEN_PROPERTY,
-    message:'GitHub token stored. The value is never returned.'
+    message:configured ? 'GitHub token is configured.' : 'Add GITHUB_TOKEN in Project Settings > Script properties.'
   };
 }
 
