@@ -18,3 +18,5 @@ Meeting metadata includes type, subtype, and workflow stage. Legal stages are Ca
 The source validation workflow checks Apps Script JavaScript syntax and Python source compilation on pushes to main.
 
 Source validation was also exercised after the latest UI change; the validation workflow checks the Apps Script source-string syntax and Python modules.
+
+Validated the UI template escaping after restoring the meeting-type helper.
