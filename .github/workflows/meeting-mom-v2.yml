@@ -193,7 +193,8 @@ jobs:
       - name: Process chunk
         env:
           WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'small' }}
-          WHISPER_COMPUTE: int8
+          WHISPER_COMPUTE_TYPE: int8
+          WHISPER_BEAM_SIZE: ${{ vars.WHISPER_BEAM_SIZE || '3' }}
         run: |
           mkdir -p result
           python src/processor.py --audio chunk.m4a --index "${{ matrix.index }}" --out result
