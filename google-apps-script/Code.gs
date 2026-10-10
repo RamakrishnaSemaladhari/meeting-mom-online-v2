@@ -1008,6 +1008,58 @@ function getMeeting(id) { return getMeeting_(id); }
  * DATA HELPERS
  * ========================= */
 
+function getMeetingOutputs(meetingId) {
+  meetingId=clean_(meetingId);
+  if(!meetingId) return {success:false,message:'Meeting ID is required.'};
+  const sheet=getRegistrySheet_();
+  const rowNo=findRow_(sheet,'Meeting ID',meetingId);
+  if(rowNo<2) return {success:false,message:'Meeting not found.'};
+  const row=getObjectAtRow_(sheet,MEETING_HEADERS,rowNo);
+  const specs=[
+    {type:'transcript',label:'Full Transcript',header:'Transcript File ID'},
+    {type:'translation',label:'English Translation',header:'Translation File ID'},
+    {type:'summary',label:'Full Summary',header:'Summary File ID'},
+    {type:'mom',label:'Minutes of Meeting',header:'MoM File ID'}
+  ];
+  const outputs={};
+  specs.forEach(function(s){
+    const id=clean_(row[s.header]);
+    if(!id){outputs[s.type]={type:s.type,label:s.label,available:false,content:'',file_id:'',url:''};return;}
+    try {
+      const file=DriveApp.getFileById(id);
+      outputs[s.type]={type:s.type,label:s.label,available:true,content:file.getBlob().getDataAsString('UTF-8'),file_id:id,url:file.getUrl(),file_name:file.getName(),updated_at:file.getLastUpdated().toISOString()};
+    } catch(err) { outputs[s.type]={type:s.type,label:s.label,available:false,content:'',file_id:id,url:'',error:String(err.message||err)}; }
+  });
+  return {success:true,meeting_id:meetingId,status:clean_(row['Status']),outputs:outputs};
+}
+
+function saveMeetingOutput(meetingId,reportType,content) {
+  meetingId=clean_(meetingId); reportType=clean_(reportType).toLowerCase();
+  content=String(content===undefined||content===null?'':content);
+  const allowed={transcript:'Transcript File ID',translation:'Translation File ID',summary:'Summary File ID',mom:'MoM File ID'};
+  if(!meetingId||!allowed[reportType]) return {success:false,message:'Valid meeting ID and output type are required.'};
+  const lock=LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const sheet=getRegistrySheet_(); const rowNo=findRow_(sheet,'Meeting ID',meetingId);
+    if(rowNo<2) return {success:false,message:'Meeting not found.'};
+    const row=getObjectAtRow_(sheet,MEETING_HEADERS,rowNo); let file=null;
+    const id=clean_(row[allowed[reportType]]);
+    if(id){try{file=DriveApp.getFileById(id);}catch(err){file=null;}}
+    if(file) file.setContent(content);
+    else {
+      const folderId=row['Reports Folder ID']||row['Meeting Folder ID'];
+      if(!folderId) return {success:false,message:'No Google Drive reports folder is recorded for this meeting.'};
+      const folder=DriveApp.getFolderById(String(folderId));
+      const fileName=meetingId+'_'+reportType+'.txt'; const files=folder.getFilesByName(fileName);
+      if(files.hasNext()){file=files.next();file.setContent(content);}else{file=folder.createFile(fileName,content,MimeType.PLAIN_TEXT);}
+      setByHeader_(sheet,MEETING_HEADERS,rowNo,allowed[reportType],file.getId());
+    }
+    setByHeader_(sheet,MEETING_HEADERS,rowNo,'Updated At',new Date());
+    logEvent_(meetingId,'OUTPUT_EDITED','REPORT',num_(row['Overall Percent']),0,reportType+' edited in dashboard and saved to Google Drive',clean_(row['Status']),clean_(row['GitHub Run ID']),{report_type:reportType,file_id:file.getId()});
+    return {success:true,meeting_id:meetingId,report_type:reportType,file_id:file.getId(),url:file.getUrl(),updated_at:file.getLastUpdated().toISOString(),message:'Saved to Google Drive.'};
+  } finally {lock.releaseLock();}
+}
+
 function getMeeting_(id) {
   id=clean_(id);
   if(!id) return {success:false,error:'MEETING_ID_REQUIRED'};
