@@ -20,3 +20,5 @@ The source validation workflow checks Apps Script JavaScript syntax and Python s
 Source validation was also exercised after the latest UI change; the validation workflow checks the Apps Script source-string syntax and Python modules.
 
 Validated the UI template escaping after restoring the meeting-type helper.
+
+Source template escape checks are part of the current validation cycle.
