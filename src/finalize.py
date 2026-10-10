@@ -115,6 +115,11 @@ def main():
     tr=merge_chunks(o,"translation.txt")
     chunk_summaries="\n\n".join("CHUNK "+str(i+1)+"\n"+x.read_text(encoding="utf-8") for i,x in enumerate(sorted(o.glob("chunk_*_summary.txt"))))
     if not ts.strip() or not tr.strip(): raise RuntimeError("Transcript or English translation is empty; refusing to complete meeting.")
+    chunk_metrics=[]
+    for metric_path in sorted(o.glob("chunk_*.json")):
+      try: chunk_metrics.append(json.loads(metric_path.read_text(encoding="utf-8")))
+      except Exception as exc: print("chunk timing parse warning:",str(exc))
+    timing_summary={"chunks_measured":len(chunk_metrics),"transcription_seconds_sum":round(sum(float(x.get("transcription_seconds",0)) for x in chunk_metrics),2),"translation_seconds_sum":round(sum(float(x.get("translation_seconds",0)) for x in chunk_metrics),2),"chunk_processing_seconds_sum":round(sum(float(x.get("total_seconds",0)) for x in chunk_metrics),2)}
     model=os.getenv("OLLAMA_MODEL","qwen2.5:3b")
     notify_progress(p,"SUMMARY_STARTED","GENERATING_SUMMARY",80,"Generating a complete meeting summary from the full transcript and translation.")
     title=p.get("meeting_title") or "Meeting"
@@ -167,7 +172,7 @@ STANDALONE MEETING SUMMARY:
     (o/"manifest.json").write_text(json.dumps({
       "meeting_id":p["meeting_id"],"meeting_title":title,"meeting_type":meeting_type,
       "meeting_subtype":subtype,"workflow_stage":stage,
-      "chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),
+      "chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),"processing_timing":timing_summary,
       "outputs":["transcript.txt","translation_en.txt","summary.txt","mom.txt","mom.docx"]
     },ensure_ascii=False,indent=2),encoding="utf-8")
     make_word(o/"mom.docx",p,mom,summary)
@@ -186,7 +191,7 @@ STANDALONE MEETING SUMMARY:
       if not ids[name]: raise RuntimeError("Drive upload did not return a file ID for "+name)
     manifest={
       "meeting_id":p["meeting_id"],"meeting_title":title,"meeting_type":meeting_type,
-      "meeting_subtype":subtype,"workflow_stage":stage,"chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),
+      "meeting_subtype":subtype,"workflow_stage":stage,"chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),"processing_timing":timing_summary,
       "file_ids":{"transcript":ids["transcript.txt"],"translation":ids["translation_en.txt"],
         "summary":ids["summary.txt"],"mom":ids["mom.txt"],"word":ids["mom.docx"]},
       "outputs":["transcript.txt","translation_en.txt","summary.txt","mom.txt","mom.docx"]
