@@ -3,7 +3,7 @@ from pathlib import Path
 from faster_whisper import WhisperModel
 
 def clean(t):
-    return re.sub(r"\\s+", " ", t or "").strip()
+    return re.sub(r"\s+", " ", t or "").strip()
 
 def transcribe(model, audio, task, language=None):
     beam_size=max(1,int(os.getenv("WHISPER_BEAM_SIZE","3")))
@@ -31,12 +31,12 @@ def main():
         translation_started=time.monotonic()
         translated=transcribe(model,a.audio,"translate",lang)[0]
         translation_seconds=time.monotonic()-translation_started
-    ot="\\n".join(f"[{x['start']:07.2f}-{x['end']:07.2f}] {x['text']}" for x in original)
+    ot="\n".join(f"[{x['start']:07.2f}-{x['end']:07.2f}] {x['text']}" for x in original)
     tt="\\n".join(f"[{x['start']:07.2f}-{x['end']:07.2f}] {x['text']}" for x in translated)
     (o/f"chunk_{a.index:04d}_transcript.txt").write_text(ot,encoding="utf-8")
     (o/f"chunk_{a.index:04d}_translation.txt").write_text(tt,encoding="utf-8")
     # Keep a lightweight chunk note; the final synthesis reads the full translation and these notes.
-    sentences=re.split(r"(?<=[.!?])\\s+",tt)
+    sentences=re.split(r"(?<=[.!?])\s+",tt)
     keys=("decided","decision","action","deadline","approve","approved","assign","owner","next","risk","issue","target","due","discuss","agreed","need","must","should")
     selected=[s for s in sentences if len(s)>35 and any(k in s.lower() for k in keys)]
     note="\\n".join(selected[:30] or sentences[:20])
