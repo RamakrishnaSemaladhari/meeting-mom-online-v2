@@ -16,3 +16,5 @@ A meeting is only complete when the Drive registry contains non-empty transcript
 Meeting metadata includes type, subtype, and workflow stage. Legal stages are Case Analysis, Document Verification, and Legal Drafting. The processing manifest records per-chunk transcription/translation timings so performance can be measured rather than estimated from audio length alone.
 
 The source validation workflow checks Apps Script JavaScript syntax and Python source compilation on pushes to main.
+
+Source validation was also exercised after the latest UI change; the validation workflow checks the Apps Script source-string syntax and Python modules.
