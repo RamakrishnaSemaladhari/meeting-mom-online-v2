@@ -1221,16 +1221,16 @@ function dashboardHtml_() {
     var meetings=(d&&d.meetings)||[];
     $('historyRows').innerHTML=meetings.map(function(x){
       var id=String(x.meeting_id||'');
-      var safe=id.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+      var safe=id.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');
       var st=String(x.status||'').toUpperCase();
       var disabled=st==='DELETED';
       var stopDisabled=disabled||st==='COMPLETED'||st==='FAILED'||st==='STOPPED';
-      return '<tr><td>'+safe+'</td><td>'+st+'</td><td>'+String(x.current_stage||'')+'</td><td>'+Number(x.overall_percent||0)+'%</td><td>'+(x.github_run_number||x.github_run_id||'—')+'</td><td><div class="rowactions">'+
-        '<button type="button" class="mini-primary history-action" data-action="rerun" data-meeting-id="'+safe+'" '+(disabled?'disabled':'')+'>Re-run</button>'+
-        '<button type="button" class="mini-secondary history-action" data-action="stop" data-meeting-id="'+safe+'" '+(stopDisabled?'disabled':'')+'>Stop</button>'+
-        '<button type="button" class="mini-danger history-action" data-action="delete" data-meeting-id="'+safe+'" '+(disabled?'disabled':'')+'>Delete</button>'+
+      return '<tr><td>'+safe+'</td><td>'+st+'</td><td>'+String(x.current_stage||'')+'</td><td>'+Number(x.overall_percent||0)+'%</td><td>'+(x.github_run_number||x.github_run_id||'—')+'</td><td><div class=\"rowactions\">'+
+        '<button type=\"button\" class=\"mini-primary history-action\" data-action=\"rerun\" data-meeting-id=\"'+safe+'\" '+(disabled?'disabled':'')+'>Re-run</button>'+
+        '<button type=\"button\" class=\"mini-secondary history-action\" data-action=\"stop\" data-meeting-id=\"'+safe+'\" '+(stopDisabled?'disabled':'')+'>Stop</button>'+
+        '<button type=\"button\" class=\"mini-danger history-action\" data-action=\"delete\" data-meeting-id=\"'+safe+'\" '+(disabled?'disabled':'')+'>Delete</button>'+
         '</div></td></tr>';
-    }).join('')||'<tr><td colspan="6">No meetings in history.</td></tr>';
+    }).join('')||'<tr><td colspan=\"6\">No meetings in history.</td></tr>';
     Array.prototype.forEach.call(document.querySelectorAll('.history-action'),function(button){
       button.addEventListener('click',function(){
         historyAction(button.getAttribute('data-action'),button.getAttribute('data-meeting-id'));
