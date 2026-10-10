@@ -47,6 +47,12 @@ MEETING SUMMARY:
    "github_run_number":os.getenv("GITHUB_RUN_NUMBER",""),
    "github_run_url":os.getenv("GITHUB_SERVER_URL","")+"/"+os.getenv("GITHUB_REPOSITORY","")+"/actions/runs/"+os.getenv("GITHUB_RUN_ID","")
   }
-  requests.post(g,json=callback,timeout=60).raise_for_status()
+  response=requests.post(g,json=callback,timeout=60)
+  response.raise_for_status()
+  try: reply=response.json()
+  except Exception: reply={"raw_response":response.text[:500]}
+  print(json.dumps({"callback_http_status":response.status_code,"callback_response":reply},ensure_ascii=False))
+  if not isinstance(reply,dict) or reply.get("success") is not True:
+   raise RuntimeError("Apps Script did not confirm meeting completion; callback response: "+json.dumps(reply,ensure_ascii=False)[:1000])
  print(json.dumps({"success":True,"meeting_id":p["meeting_id"],"uploaded":ids}))
 if __name__=="__main__":main()
