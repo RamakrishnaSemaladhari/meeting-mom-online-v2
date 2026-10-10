@@ -16,6 +16,34 @@ def ollama(prompt, model):
     if not answer: raise RuntimeError("Ollama returned an empty response")
     return answer
 
+def notify_progress(payload, event, stage, percent, message):
+    gateway=os.getenv("MMV2_GATEWAY_URL","").strip()
+    if not gateway: return
+    body={"action":"processing_event","callback_secret":os.getenv("MMV2_CALLBACK_SECRET",""),
+          "meeting_id":payload.get("meeting_id",""),"event":event,"stage":stage,
+          "progress_percent":percent,"status":"PROCESSING","message":message}
+    try:
+        r=requests.post(gateway,json=body,timeout=20); r.raise_for_status()
+        print(json.dumps({"progress_callback":event,"status":r.status_code}))
+    except Exception as exc:
+        print("progress callback warning:",str(exc))
+
+def merge_chunks(out, suffix):
+    chunks=sorted(out.glob("chunk_*_"+suffix))
+    merged=[]
+    for path in chunks:
+        match=re.search(r"chunk_(\d+)_",path.name)
+        offset=(int(match.group(1))*600) if match else 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stamp=re.match(r"^\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\](.*)$",line)
+            if stamp:
+                start=float(stamp.group(1))+offset; end=float(stamp.group(2))+offset
+                merged.append(f"[{start:07.2f}-{end:07.2f}]{stamp.group(3)}")
+            else:
+                merged.append(line)
+        merged.append("")
+    return "\n".join(merged).strip()
+
 def make_word(path, meeting, mom_text, summary):
     doc=Document()
     sec=doc.sections[0]
@@ -83,11 +111,12 @@ def main():
     a=ap.parse_args()
     p=json.loads(Path(a.payload).read_text(encoding="utf-8"))
     o=Path(a.out); o.mkdir(parents=True,exist_ok=True)
-    ts="\n\n".join(x.read_text(encoding="utf-8") for x in sorted(o.glob("chunk_*_transcript.txt")))
-    tr="\n\n".join(x.read_text(encoding="utf-8") for x in sorted(o.glob("chunk_*_translation.txt")))
+    ts=merge_chunks(o,"transcript.txt")
+    tr=merge_chunks(o,"translation.txt")
     chunk_summaries="\n\n".join("CHUNK "+str(i+1)+"\n"+x.read_text(encoding="utf-8") for i,x in enumerate(sorted(o.glob("chunk_*_summary.txt"))))
     if not ts.strip() or not tr.strip(): raise RuntimeError("Transcript or English translation is empty; refusing to complete meeting.")
     model=os.getenv("OLLAMA_MODEL","qwen2.5:3b")
+    notify_progress(p,"SUMMARY_STARTED","GENERATING_SUMMARY",80,"Generating a complete meeting summary from the full transcript and translation.")
     title=p.get("meeting_title") or "Meeting"
     meeting_type=p.get("meeting_type") or "General Meeting"
     subtype=p.get("meeting_subtype") or "General"
@@ -119,11 +148,13 @@ FULL ENGLISH TRANSLATION (timestamps retained where available):
 """
     summary=ollama(base+"""
 Create a COMPLETE STANDALONE MEETING SUMMARY for a person who does not want formal minutes. Cover the entire meeting, not only decisions: purpose and context, all major topics in chronological order, explanations and important details, conclusions, decisions, unresolved questions, risks/concerns, action items with owner and deadline only where actually stated, and next steps. Preserve important numbers, names, technical terms and distinctions. Clearly mark information not stated. Do not fabricate. Use useful headings and readable detail; do not make it merely a short executive summary.""",model)
+    notify_progress(p,"MOM_STARTED","GENERATING_MOM",86,"Generating formal Minutes of Meeting and stage-specific content.")
     mom=ollama(base+f"""
 Create formal, circulation-ready Minutes of Meeting (MoM), distinct from the standalone summary. Include a title, meeting metadata, agenda, attendees, purpose, key discussion points, decisions, action-item table/list with owner/deadline/status only where supported, risks/issues, open questions, next steps and follow-up. Include all material topics, not only actions. Never invent attendees, dates, commitments or legal facts. Use 'Not specified' when needed. For the selected workflow stage, make the stage-specific section explicit.
 STANDALONE MEETING SUMMARY:
 {summary}
 """,model)
+    notify_progress(p,"UPLOAD_STARTED","UPLOADING_REPORTS",92,"Uploading transcript, translation, full summary, MoM, Word document and manifest to Google Drive.")
     outputs={
       "transcript.txt":ts,
       "translation_en.txt":tr,
