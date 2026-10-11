@@ -57,9 +57,10 @@ def make_word(path, meeting, mom_text, summary):
     styles["Title"].font.size=Pt(22)
     styles["Title"].font.bold=True
     meeting_type=(meeting.get("meeting_type") or "General Meeting").lower()
+    subtype_key=(meeting.get("meeting_subtype") or "").lower()
     if "lecture" in meeting_type or "education" in meeting_type or "training" in meeting_type:
       document_title="LECTURE NOTES AND LEARNING SUMMARY"
-    elif "notes" in meeting_type:
+    elif "notes" in meeting_type or "notes" in subtype_key:
       document_title="MEETING NOTES"
     else:
       document_title="MINUTES OF MEETING"
@@ -144,7 +145,7 @@ def main():
       output_profile="LEGAL CLIENT MEETING: integrate the current discussion with matching prior case history. Preserve chronology, prior decisions, client instructions, evidence/document status, unresolved issues, deadlines and commitments. Explicitly distinguish prior facts from new developments and flag conflicts or uncertain status."
     elif "lecture" in type_key or "education" in type_key or "training" in type_key:
       output_profile="LECTURE / TRAINING: organize the material topic by topic; explain concepts in student-friendly language; include examples where present, key definitions, points to remember, revision notes and likely exam questions. Link to prior lessons only when the series/reference matches."
-    elif "notes" in type_key:
+    elif "notes" in type_key or "notes" in subtype.lower():
       output_profile="NOTES: produce a concise, easy-to-scan summary of important points, decisions, names/numbers, follow-ups and unresolved items; do not force formal MoM headings if they add no value."
     else:
       output_profile="BUSINESS / GENERAL MEETING: produce a standalone summary and formal MoM, compare current discussion with prior commitments, and carry forward unresolved tasks with original owner/deadline where available."
