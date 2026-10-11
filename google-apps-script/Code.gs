@@ -559,7 +559,7 @@ function contextTypeCompatible_(currentType, priorType) {
   if(c.indexOf('education')>=0||c.indexOf('lecture')>=0||c.indexOf('training')>=0)
     return p.indexOf('education')>=0||p.indexOf('lecture')>=0||p.indexOf('training')>=0;
   if(c==='business general'||c==='business'||c==='general meeting')
-    return p!=='legal'&&p.indexOf('education')<0&&p.indexOf('lecture')<0;
+    return ['business','business general','general meeting','general'].indexOf(p)>=0;
   return c===p;
 }
 function resolvePreviousMeetingContext_(d, currentMeetingId) {
