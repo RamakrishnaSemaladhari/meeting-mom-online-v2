@@ -172,13 +172,13 @@ def make_word(path, meeting, mom_text, summary):
       if first and line.upper() in ("MINUTES OF MEETING","MEETING MINUTES"):
         first=False; continue
       first=False
-      clean_line=re.sub(r"^#{1,3}\\s*","",line).replace("**","").strip()
-      if len(clean_line)<120 and (line.startswith("#") or clean_line.endswith(":") or re.match(r"^(executive summary|meeting details|agenda|attendees|participants|key discussion|discussion points|decisions|action items|commitments|complete conversation summary|next steps|deadlines|risks|issues|open questions|pending follow-up|next meeting|review flags|conclusion|stage [123])\\s*$",clean_line,re.I)):
+      clean_line=re.sub(r"^#{1,3}\s*","",line).replace("**","").strip()
+      if len(clean_line)<120 and (line.startswith("#") or clean_line.endswith(":") or re.match(r"^(executive summary|meeting details|agenda|attendees|participants|key discussion|discussion points|decisions|action items|commitments|complete conversation summary|next steps|deadlines|risks|issues|open questions|pending follow-up|next meeting|review flags|conclusion|stage [123])\s*$",clean_line,re.I)):
         doc.add_heading(clean_line.rstrip(":"),level=2)
-      elif re.match(r"^[-*•]\\s+",clean_line):
-        doc.add_paragraph(re.sub(r"^[-*•]\\s+","",clean_line),style="List Bullet")
-      elif re.match(r"^\\d+[.)]\\s+",clean_line):
-        doc.add_paragraph(re.sub(r"^\\d+[.)]\\s+","",clean_line),style="List Number")
+      elif re.match(r"^[-*•]\s+",clean_line):
+        doc.add_paragraph(re.sub(r"^[-*•]\s+","",clean_line),style="List Bullet")
+      elif re.match(r"^\d+[.)]\s+",clean_line):
+        doc.add_paragraph(re.sub(r"^\d+[.)]\s+","",clean_line),style="List Number")
       else:
         doc.add_paragraph(clean_line)
     flush_table()
