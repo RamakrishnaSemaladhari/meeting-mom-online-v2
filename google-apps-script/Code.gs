@@ -1319,30 +1319,108 @@ function saveMeetingOutput(meetingId,reportType,content) {
   } finally {lock.releaseLock();}
 }
 
+/**
+ * Run once from the Apps Script editor after granting the Google Docs scope.
+ * This forces the owner account to request/refresh the authorization required by Word export.
+ */
+function authorizeDocumentServices() {
+  const doc = DocumentApp.create('MMV2_Authorization_Check');
+  const id = doc.getId();
+  doc.getBody().appendParagraph('Authorization check');
+  doc.saveAndClose();
+  DriveApp.getFileById(id).setTrashed(true);
+  return 'Google Docs and Drive services authorized.';
+}
+
 function exportMomWord(meetingId,content,saveToDrive) {
   meetingId=clean_(meetingId); content=String(content||'');
   if(!meetingId||!content.trim()) return {success:false,message:'Meeting ID and MoM content are required.'};
   const sheet=getRegistrySheet_(), rowNo=findRow_(sheet,'Meeting ID',meetingId);
   if(rowNo<2) return {success:false,message:'Meeting not found.'};
   const row=getObjectAtRow_(sheet,MEETING_HEADERS,rowNo);
-  let doc=null, tempId='';
+  let tempId='';
   try {
-    doc=DocumentApp.create('MoM_'+meetingId);
+    const doc=DocumentApp.create('MoM_'+meetingId);
     tempId=doc.getId();
-    const body=doc.getBody(); body.clear();
-    const lines=content.split(/\r?\n/);
-    let first=true;
-    lines.forEach(function(line){
-      const text=String(line||'').trim();
-      if(!text){body.appendParagraph('');return;}
-      if(first){const p=body.appendParagraph(text);p.setHeading(DocumentApp.ParagraphHeading.TITLE);first=false;}
-      else if(/^(agenda|meeting details|attendees|participants|key discussion|discussion points|decisions|action items|next steps|deadlines|risks|summary)\s*:?$/i.test(text)){
-        body.appendParagraph(text.replace(/:$/,'')).setHeading(DocumentApp.ParagraphHeading.HEADING1);
-      }else{
-        const p=body.appendParagraph(text);p.setSpacingAfter(6);
+    const body=doc.getBody();
+    body.clear();
+    body.setMarginTop(48).setMarginBottom(48).setMarginLeft(54).setMarginRight(54);
+
+    const lines=content.replace(/\r/g,'').split('\n');
+    let firstContent=true, tableRows=[];
+    const headingNames=/^(executive summary|key discussion points?|discussion points?|decisions?|action items?|commitments?|complete conversation summary|open questions?(?:\s*\/\s*pending follow-up)?|pending follow-up|next meeting|review flags?|meeting details|attendees|participants|agenda|immediate next steps|risks?\s*\/\s*issues?)\s*:??$/i;
+
+    function addTable(rows) {
+      if(!rows.length) return;
+      const cleaned=rows.filter(function(r){return r.some(function(c){return String(c).trim()!=='';});});
+      if(!cleaned.length) return;
+      const maxCols=Math.max.apply(null,cleaned.map(function(r){return r.length;}));
+      const normalized=cleaned.map(function(r){while(r.length<maxCols)r.push('');return r;});
+      const tbl=body.appendTable(normalized);
+      tbl.setBorderWidth(0.5);
+      for(let ri=0;ri<tbl.getNumRows();ri++){
+        const tr=tbl.getRow(ri);
+        for(let ci=0;ci<tr.getNumCells();ci++){
+          const cell=tr.getCell(ci);
+          cell.setPaddingTop(4).setPaddingBottom(4).setPaddingLeft(5).setPaddingRight(5);
+          cell.editAsText().setFontFamily('Arial').setFontSize(9);
+          if(ri===0){
+            cell.setBackgroundColor('#D9EAF7');
+            cell.editAsText().setBold(true).setForegroundColor('#17365D');
+          }
+        }
       }
+      body.appendParagraph('').setSpacingAfter(2);
+    }
+    function flushTable(){if(tableRows.length){addTable(tableRows);tableRows=[];}}
+    function splitPipe(line){return line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(function(c){return c.trim().replace(/\\\|/g,'|');});}
+
+    lines.forEach(function(raw){
+      const line=String(raw||'').trim();
+      if(!line){flushTable();return;}
+      if(/^\|.*\|$/.test(line)){
+        const cells=splitPipe(line);
+        if(cells.every(function(c){return /^:?-{3,}:?$/.test(c);})) return;
+        tableRows.push(cells); return;
+      }
+      flushTable();
+      const heading=line.replace(/^#{1,3}\s*/,'').replace(/\*\*/g,'').replace(/:$/,'').trim();
+      if(firstContent){
+        const p=body.appendParagraph(heading);
+        p.setHeading(DocumentApp.ParagraphHeading.TITLE);
+        p.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+        p.setSpacingAfter(12);
+        p.editAsText().setFontFamily('Arial').setFontSize(18).setBold(true).setForegroundColor('#17365D');
+        firstContent=false; return;
+      }
+      if(/^#{1,3}\s*/.test(line)||headingNames.test(heading)){
+        const p=body.appendParagraph(heading);
+        p.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+        p.setSpacingBefore(12).setSpacingAfter(5);
+        p.editAsText().setFontFamily('Arial').setFontSize(12).setBold(true).setForegroundColor('#1F4E79');
+        return;
+      }
+      if(/^[-*•]\s+/.test(line)){
+        const p=body.appendListItem(line.replace(/^[-*•]\s+/,'')); 
+        p.setGlyphType(DocumentApp.GlyphType.BULLET);
+        p.setSpacingAfter(3);
+        p.editAsText().setFontFamily('Arial').setFontSize(10);
+        return;
+      }
+      if(/^\d+[.)]\s+/.test(line)){
+        const p=body.appendListItem(line.replace(/^\d+[.)]\s+/,'')); 
+        p.setGlyphType(DocumentApp.GlyphType.NUMBER);
+        p.setSpacingAfter(3);
+        p.editAsText().setFontFamily('Arial').setFontSize(10);
+        return;
+      }
+      const p=body.appendParagraph(heading);
+      p.setSpacingAfter(6);
+      p.editAsText().setFontFamily('Arial').setFontSize(10).setForegroundColor('#222222');
     });
+    flushTable();
     doc.saveAndClose();
+
     const blob=DriveApp.getFileById(tempId).getAs(MimeType.MICROSOFT_WORD).setName('MoM_'+meetingId+'.docx');
     let savedFile=null;
     if(saveToDrive){
@@ -1356,8 +1434,11 @@ function exportMomWord(meetingId,content,saveToDrive) {
       setByHeader_(sheet,MEETING_HEADERS,rowNo,'Updated At',new Date());
     }
     return {success:true,file_name:blob.getName(),mime_type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',base64:Utilities.base64Encode(blob.getBytes()),drive_url:savedFile?savedFile.getUrl():'',message:saveToDrive?'Word document saved to Drive and ready to download.':'Word document ready to download; not saved to Drive.'};
-  } catch(err) { return {success:false,message:String(err.message||err)}; }
-  finally { if(tempId){try{DriveApp.getFileById(tempId).setTrashed(true);}catch(cleanErr){}} }
+  } catch(err) {
+    return {success:false,message:String(err.message||err)};
+  } finally {
+    if(tempId){try{DriveApp.getFileById(tempId).setTrashed(true);}catch(cleanErr){}}
+  }
 }
 
 function getMeeting_(id) {
