@@ -56,9 +56,16 @@ def make_word(path, meeting, mom_text, summary):
     styles["Title"].font.name="Aptos Display"
     styles["Title"].font.size=Pt(22)
     styles["Title"].font.bold=True
+    meeting_type=(meeting.get("meeting_type") or "General Meeting").lower()
+    if "lecture" in meeting_type or "education" in meeting_type or "training" in meeting_type:
+      document_title="LECTURE NOTES AND LEARNING SUMMARY"
+    elif "notes" in meeting_type:
+      document_title="MEETING NOTES"
+    else:
+      document_title="MINUTES OF MEETING"
     title=doc.add_paragraph(style="Title")
     title.alignment=WD_ALIGN_PARAGRAPH.CENTER
-    title.add_run("MINUTES OF MEETING")
+    title.add_run(document_title)
     subtitle=doc.add_paragraph()
     subtitle.alignment=WD_ALIGN_PARAGRAPH.CENTER
     run=subtitle.add_run(meeting.get("meeting_title") or "Meeting")
@@ -126,6 +133,21 @@ def main():
     meeting_type=p.get("meeting_type") or "General Meeting"
     subtype=p.get("meeting_subtype") or "General"
     stage=p.get("workflow_stage") or "Standard"
+    context_mode=(p.get("context_mode") or "series").lower()
+    series_reference=p.get("series_reference") or ""
+    previous_context=p.get("previous_context") or {}
+    previous_context_text=previous_context.get("context_text","") if context_mode!="fresh" else ""
+    if not previous_context_text:
+      previous_context_text="No previous meeting context attached."
+    type_key=meeting_type.lower()
+    if "legal" in type_key:
+      output_profile="LEGAL CLIENT MEETING: integrate the current discussion with matching prior case history. Preserve chronology, prior decisions, client instructions, evidence/document status, unresolved issues, deadlines and commitments. Explicitly distinguish prior facts from new developments and flag conflicts or uncertain status."
+    elif "lecture" in type_key or "education" in type_key or "training" in type_key:
+      output_profile="LECTURE / TRAINING: organize the material topic by topic; explain concepts in student-friendly language; include examples where present, key definitions, points to remember, revision notes and likely exam questions. Link to prior lessons only when the series/reference matches."
+    elif "notes" in type_key:
+      output_profile="NOTES: produce a concise, easy-to-scan summary of important points, decisions, names/numbers, follow-ups and unresolved items; do not force formal MoM headings if they add no value."
+    else:
+      output_profile="BUSINESS / GENERAL MEETING: produce a standalone summary and formal MoM, compare current discussion with prior commitments, and carry forward unresolved tasks with original owner/deadline where available."
     # Include the full translated meeting when possible so the summary is about the entire discussion,
     # not just keyword-selected action sentences. Keep a bounded context for the configured local model.
     translation_context=tr[:100000]
@@ -141,6 +163,12 @@ AGENDA: {p.get('agenda') or 'Not specified'}
 MEETING TYPE: {meeting_type}
 SUBTYPE: {subtype}
 WORKFLOW STAGE: {stage}
+SERIES / SUBJECT / CASE REFERENCE: {series_reference or 'Not specified'}
+CONTEXT MODE: {context_mode}
+OUTPUT PROFILE: {output_profile}
+PREVIOUS RELATED MEETING CONTEXT (empty in fresh mode):
+{previous_context_text}
+Continuity rules: treat the latest explicit status as authoritative; retain older unresolved commitments; mark a task completed only when the current discussion clearly confirms completion; otherwise label it pending verification. Preserve original owners and due dates when available. Never merge unrelated clients, cases, courses or projects. Clearly distinguish historical context from statements made in the current meeting.
 For legal workflow stages, apply the requested stage:
 - Stage 1 — Case Analysis: facts, chronology, parties, issues, claims, questions and missing information.
 - Stage 2 — Document Verification: referenced evidence/documents, verification status, inconsistencies and missing records. Do not claim to verify files that were not supplied.
@@ -152,10 +180,10 @@ FULL ENGLISH TRANSLATION (timestamps retained where available):
 {translation_context}{context_note}
 """
     summary=ollama(base+"""
-Create a COMPLETE STANDALONE MEETING SUMMARY for a person who does not want formal minutes. Cover the entire meeting, not only decisions: purpose and context, all major topics in chronological order, explanations and important details, conclusions, decisions, unresolved questions, risks/concerns, action items with owner and deadline only where actually stated, and next steps. Preserve important numbers, names, technical terms and distinctions. Clearly mark information not stated. Do not fabricate. Use useful headings and readable detail; do not make it merely a short executive summary.""",model)
+Create a COMPLETE STANDALONE SUMMARY for a person who does not want formal minutes. Follow the OUTPUT PROFILE. Cover the current meeting's full content and use prior context only to explain continuity, prior commitments and changes. For legal meetings, combine relevant previous and current case discussions into a clear chronology while separating prior and new information. For lectures, provide topic-wise concept explanations, points to remember and expected questions. For notes, emphasize concise important points. Cover purpose, major topics, explanations, conclusions, decisions, unresolved questions, risks, action items with owner/deadline only where stated, and next steps. Preserve names, numbers and distinctions. Clearly mark unknowns. Do not fabricate.""",model)
     notify_progress(p,"MOM_STARTED","GENERATING_MOM",86,"Generating formal Minutes of Meeting and stage-specific content.")
     mom=ollama(base+f"""
-Create formal, circulation-ready Minutes of Meeting (MoM), distinct from the standalone summary. Include a title, meeting metadata, agenda, attendees, purpose, key discussion points, decisions, action-item table/list with owner/deadline/status only where supported, risks/issues, open questions, next steps and follow-up. Include all material topics, not only actions. Never invent attendees, dates, commitments or legal facts. Use 'Not specified' when needed. For the selected workflow stage, make the stage-specific section explicit.
+Follow the OUTPUT PROFILE and create the appropriate structured second output, distinct from the standalone summary. For business/general meetings, create formal, circulation-ready MoM with metadata, agenda, attendees, discussion, decisions, action items, owners/deadlines/status where supported, risks, open questions and next steps. For Notes, create clean organized notes with important points and action items. For Lectures/Training, create lecture notes with topic-wise explanations, key concepts, examples when present, points to remember, revision questions and expected exam questions. For Legal meetings, create a consolidated prior-plus-current case meeting record with chronology, prior decisions, new developments, open issues, action-item status, owners/deadlines and stage-specific sections. Clearly distinguish historical facts from current discussion. Never mark a prior task completed unless completion is confirmed; use 'Pending verification' where unclear. Never invent attendees, dates, commitments, facts or legal authorities. Use 'Not specified' when needed. Make the selected legal workflow stage explicit.
 STANDALONE MEETING SUMMARY:
 {summary}
 """,model)
@@ -171,7 +199,8 @@ STANDALONE MEETING SUMMARY:
       (o/name).write_text(content,encoding="utf-8")
     (o/"manifest.json").write_text(json.dumps({
       "meeting_id":p["meeting_id"],"meeting_title":title,"meeting_type":meeting_type,
-      "meeting_subtype":subtype,"workflow_stage":stage,
+      "meeting_subtype":subtype,"workflow_stage":stage,"context_mode":context_mode,
+      "series_reference":series_reference,"previous_context_meetings":previous_context.get("meetings",[]),
       "chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),"processing_timing":timing_summary,
       "outputs":["transcript.txt","translation_en.txt","summary.txt","mom.txt","mom.docx"]
     },ensure_ascii=False,indent=2),encoding="utf-8")
@@ -191,7 +220,9 @@ STANDALONE MEETING SUMMARY:
       if not ids[name]: raise RuntimeError("Drive upload did not return a file ID for "+name)
     manifest={
       "meeting_id":p["meeting_id"],"meeting_title":title,"meeting_type":meeting_type,
-      "meeting_subtype":subtype,"workflow_stage":stage,"chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),"processing_timing":timing_summary,
+      "meeting_subtype":subtype,"workflow_stage":stage,"context_mode":context_mode,
+      "series_reference":series_reference,"previous_context_meetings":previous_context.get("meetings",[]),
+      "chunk_count":len(list(o.glob("chunk_*_transcript.txt"))),"processing_timing":timing_summary,
       "file_ids":{"transcript":ids["transcript.txt"],"translation":ids["translation_en.txt"],
         "summary":ids["summary.txt"],"mom":ids["mom.txt"],"word":ids["mom.docx"]},
       "outputs":["transcript.txt","translation_en.txt","summary.txt","mom.txt","mom.docx"]
