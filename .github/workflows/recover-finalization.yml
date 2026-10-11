@@ -1,0 +1,125 @@
+name: Recover Meeting MoM Finalization
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Original GitHub Actions run ID whose chunk artifacts should be reused"
+        required: true
+        type: string
+      expected_meeting_id:
+        description: "Meeting ID to verify against the prepared payload"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: meeting-mom-recovery-${{ inputs.expected_meeting_id }}
+  cancel-in-progress: false
+
+jobs:
+  recover-finalization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download prepared payload from original run
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-${{ inputs.source_run_id }}
+          path: prepared
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download original chunk results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*-${{ inputs.source_run_id }}
+          path: result
+          merge-multiple: true
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify recovery payload and chunk outputs
+        env:
+          EXPECTED_MEETING_ID: ${{ inputs.expected_meeting_id }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = json.loads(Path("prepared/payload.json").read_text(encoding="utf-8"))
+          expected = os.environ["EXPECTED_MEETING_ID"].strip()
+          if p.get("meeting_id") != expected:
+              raise SystemExit(f"Meeting ID mismatch: payload has {p.get('meeting_id')!r}, expected {expected!r}")
+          out = Path("result")
+          required = ["chunk_0000_transcript.txt", "chunk_0000_translation.txt", "chunk_0000_summary.txt"]
+          missing = [name for name in required if not list(out.glob(name))]
+          if missing:
+              raise SystemExit("Original run artifacts are missing required chunk files: " + ", ".join(missing))
+          summaries = list(out.glob("chunk_*_summary.txt"))
+          transcripts = list(out.glob("chunk_*_transcript.txt"))
+          translations = list(out.glob("chunk_*_translation.txt"))
+          if not summaries or len(transcripts) != len(summaries) or len(translations) != len(summaries):
+              raise SystemExit(f"Incomplete chunk artifacts: summaries={len(summaries)}, transcripts={len(transcripts)}, translations={len(translations)}")
+          print(json.dumps({"meeting_id": expected, "recovered_chunks": len(summaries), "resume_stage": "finalization"}))
+          PY
+
+      - name: Notify Control Tower — recovery started
+        env:
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          EXPECTED_MEETING_ID: ${{ inputs.expected_meeting_id }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          url = os.environ.get("MMV2_GATEWAY_URL", "").strip()
+          if url:
+              body = {"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),
+                      "meeting_id":os.environ["EXPECTED_MEETING_ID"],"event":"FINALIZATION_RECOVERY_STARTED",
+                      "stage":"GENERATING_SUMMARY","progress_percent":78,"status":"PROCESSING",
+                      "message":"Previous transcription results recovered. Resuming AI summary and document generation; transcription will not be repeated."}
+              try:
+                  req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type":"application/json"})
+                  urllib.request.urlopen(req, timeout=20).read()
+              except Exception as exc:
+                  print("progress callback warning:", exc)
+          PY
+
+      - name: Install Ollama model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do ollama list >/dev/null 2>&1 && break; sleep 2; done
+          ollama pull "${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}"
+
+      - name: Resume summary, MoM and Drive output generation
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
+          MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python src/finalize.py --payload prepared/payload.json --out result
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: meeting-mom-recovery-${{ inputs.expected_meeting_id }}-${{ github.run_id }}
+          path: result/
+          retention-days: 7
