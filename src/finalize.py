@@ -72,13 +72,13 @@ def make_word(path, meeting, mom_text, summary):
     doc=Document()
     sec=doc.sections[0]
     sec.top_margin=Inches(0.7); sec.bottom_margin=Inches(0.7)
-    sec.left_margin=Inches(0.8); sec.right_margin=Inches(0.8)
+    sec.left_margin=Inches(0.65); sec.right_margin=Inches(0.65)
     styles=doc.styles
     styles["Normal"].font.name="Aptos"
-    styles["Normal"].font.size=Pt(10)
+    styles["Normal"].font.size=Pt(9.5)
     styles["Normal"].paragraph_format.space_after=Pt(5)
     styles["Title"].font.name="Aptos Display"
-    styles["Title"].font.size=Pt(22)
+    styles["Title"].font.size=Pt(21)
     styles["Title"].font.bold=True
     meeting_type=(meeting.get("meeting_type") or "General Meeting").lower()
     subtype_key=(meeting.get("meeting_subtype") or "").lower()
@@ -114,24 +114,74 @@ def make_word(path, meeting, mom_text, summary):
     if summary.strip():
       doc.add_heading("Executive Summary", level=1)
       for line in summary.splitlines():
-        if line.strip(): doc.add_paragraph(line.strip())
+        if line.strip():
+          doc.add_paragraph(line.strip())
     doc.add_heading("Minutes and Discussion", level=1)
     first=True
+    table_rows=[]
+
+    def add_markdown_table(rows):
+      if not rows: return
+      normalized=[]
+      width=max(len(r) for r in rows)
+      for row in rows:
+        row=list(row)
+        row.extend([""]*(width-len(row)))
+        normalized.append(row)
+      tbl=doc.add_table(rows=0, cols=width)
+      tbl.style="Table Grid"
+      tbl.autofit=True
+      for ridx,row in enumerate(normalized):
+        cells=tbl.add_row().cells
+        for cidx,value in enumerate(row):
+          cells[cidx].text=value
+          for paragraph in cells[cidx].paragraphs:
+            paragraph.paragraph_format.space_after=Pt(2)
+            for run in paragraph.runs:
+              run.font.name="Aptos"; run.font.size=Pt(8)
+              if ridx==0:
+                run.bold=True; run.font.color.rgb=RGBColor(255,255,255)
+          if ridx==0:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            shading=OxmlElement("w:shd"); shading.set(qn("w:fill"),"1F4E79")
+            cells[cidx]._tc.get_or_add_tcPr().append(shading)
+      doc.add_paragraph("")
+
+    def split_pipe(line):
+      return [cell.strip().replace("\\\\|","|") for cell in line.strip().strip("|").split("|")]
+
+    def flush_table():
+      nonlocal table_rows
+      if table_rows:
+        add_markdown_table(table_rows)
+        table_rows=[]
+
     for raw in mom_text.splitlines():
       line=raw.strip()
       if not line:
+        flush_table()
         continue
+      if line.startswith("|") and "|" in line[1:]:
+        cells=split_pipe(line)
+        if cells and all(re.match(r"^:?-{3,}:?$",cell) for cell in cells):
+          continue
+        table_rows.append(cells)
+        continue
+      flush_table()
       if first and line.upper() in ("MINUTES OF MEETING","MEETING MINUTES"):
         first=False; continue
       first=False
-      if len(line)<90 and (line.endswith(":") or re.match(r"^(executive summary|meeting details|agenda|attendees|participants|key discussion|discussion points|decisions|action items|next steps|deadlines|risks|issues|open questions|follow-up|conclusion|stage [123])\s*$",line,re.I)):
-        doc.add_heading(line.rstrip(":"),level=2)
-      elif re.match(r"^[-*•]\s+",line):
-        doc.add_paragraph(re.sub(r"^[-*•]\s+","",line),style="List Bullet")
-      elif re.match(r"^\d+[.)]\s+",line):
-        doc.add_paragraph(re.sub(r"^\d+[.)]\s+","",line),style="List Number")
+      clean_line=re.sub(r"^#{1,3}\\s*","",line).replace("**","").strip()
+      if len(clean_line)<120 and (line.startswith("#") or clean_line.endswith(":") or re.match(r"^(executive summary|meeting details|agenda|attendees|participants|key discussion|discussion points|decisions|action items|commitments|complete conversation summary|next steps|deadlines|risks|issues|open questions|pending follow-up|next meeting|review flags|conclusion|stage [123])\\s*$",clean_line,re.I)):
+        doc.add_heading(clean_line.rstrip(":"),level=2)
+      elif re.match(r"^[-*•]\\s+",clean_line):
+        doc.add_paragraph(re.sub(r"^[-*•]\\s+","",clean_line),style="List Bullet")
+      elif re.match(r"^\\d+[.)]\\s+",clean_line):
+        doc.add_paragraph(re.sub(r"^\\d+[.)]\\s+","",clean_line),style="List Number")
       else:
-        doc.add_paragraph(line)
+        doc.add_paragraph(clean_line)
+    flush_table()
     footer=sec.footer.paragraphs[0]
     footer.alignment=WD_ALIGN_PARAGRAPH.CENTER
     footer.add_run("Meeting online V2 • Generated from recorded meeting content").font.size=Pt(8)
@@ -210,7 +260,7 @@ CHRONOLOGICAL CHUNK SUMMARIES (summaries of the complete audio segments; preserv
 Create a COMPLETE STANDALONE SUMMARY for a person who does not want formal minutes. Follow the OUTPUT PROFILE. Cover the current meeting's full content and use prior context only to explain continuity, prior commitments and changes. For legal meetings, combine relevant previous and current case discussions into a clear chronology while separating prior and new information. For lectures, provide topic-wise concept explanations, points to remember and expected questions. For notes, emphasize concise important points. Cover purpose, major topics, explanations, conclusions, decisions, unresolved questions, risks, action items with owner/deadline only where stated, and next steps. Preserve names, numbers and distinctions. Clearly mark unknowns. Do not fabricate.""",model)
     notify_progress(p,"MOM_STARTED","GENERATING_MOM",86,"Standalone summary prepared. The AI is formatting the formal MoM or topic-wise learning notes.")
     mom=ollama(base+f"""
-Follow the OUTPUT PROFILE and create the appropriate structured second output, distinct from the standalone summary. For business/general meetings, create formal, circulation-ready MoM with metadata, agenda, attendees, discussion, decisions, action items, owners/deadlines/status where supported, risks, open questions and next steps. For Notes, create clean organized notes with important points and action items. For Lectures/Training, create lecture notes with topic-wise explanations, key concepts, examples when present, points to remember, revision questions and expected exam questions. For Legal meetings, create a consolidated prior-plus-current case meeting record with chronology, prior decisions, new developments, open issues, action-item status, owners/deadlines and stage-specific sections. Clearly distinguish historical facts from current discussion. Never mark a prior task completed unless completion is confirmed; use 'Pending verification' where unclear. Never invent attendees, dates, commitments, facts or legal authorities. Use 'Not specified' when needed. Make the selected legal workflow stage explicit.
+Follow the OUTPUT PROFILE and create the appropriate structured second output, distinct from the standalone summary. For business/general meetings, create formal, circulation-ready MoM using these sections in this order where applicable: Minutes of Meeting title; meeting metadata; Executive Summary; Key Discussion Points; Decisions; Action Items; Commitments; Complete Conversation Summary; Open Questions / Pending Follow-up; Next Meeting; Review Flags. For Decisions, output a Markdown pipe table with columns Decision | Timestamp | Evidence | Review flag. For Action Items, output a Markdown pipe table with columns Action | Owner | Deadline | Timestamp | Evidence | Review flag. For Commitments, output a Markdown pipe table with columns Commitment | Owner | Deadline | Timestamp | Evidence | Review flag. Put one action/decision/commitment per row. Keep evidence concise and grounded in the supplied chunk summaries; if exact evidence wording or timestamp is unavailable, use 'Not available' rather than fabricate. If no decision/action/commitment is supported, say 'None explicitly stated' instead of inventing a row. Use bullet points for Key Discussion Points and Review Flags. For Notes, create clean organized notes with important points and action items. For Lectures/Training, create lecture notes with topic-wise explanations, key concepts, examples when present, points to remember, revision questions and expected exam questions. For Legal meetings, create a consolidated prior-plus-current case meeting record with chronology, prior decisions, new developments, open issues, action-item status, owners/deadlines and stage-specific sections. Clearly distinguish historical facts from current discussion. Never mark a prior task completed unless completion is confirmed; use 'Pending verification' where unclear. Never invent attendees, dates, commitments, facts or legal authorities. Use 'Not specified' when needed. Make the selected legal workflow stage explicit. Use actual Markdown table syntax with pipes and a separator row so the tables render in the Word document.
 STANDALONE MEETING SUMMARY:
 {summary}
 """,model)
