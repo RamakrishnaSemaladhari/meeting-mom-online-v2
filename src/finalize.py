@@ -7,14 +7,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from drive import DriveClient
 
 def ollama(prompt, model):
-    r=requests.post("http://127.0.0.1:11434/api/generate",
-        json={"model":model,"prompt":prompt,"stream":False,
-              "options":{"temperature":0.15,"num_ctx":32768}},
-        timeout=900)
-    r.raise_for_status()
-    answer=(r.json().get("response") or "").strip()
-    if not answer: raise RuntimeError("Ollama returned an empty response")
-    return answer
+    # Keep synthesis requests bounded. Retry once with a smaller context/prompt on timeout.
+    attempts = [
+        {"prompt": prompt, "num_ctx": 16384, "timeout": 480},
+        {"prompt": prompt[:22000], "num_ctx": 8192, "timeout": 300},
+    ]
+    last_error = None
+    for attempt_no, attempt in enumerate(attempts, start=1):
+        try:
+            print(json.dumps({"ai_request": "started", "attempt": attempt_no,
+                              "prompt_chars": len(attempt["prompt"]),
+                              "context_tokens": attempt["num_ctx"],
+                              "timeout_seconds": attempt["timeout"]}))
+            r = requests.post("http://127.0.0.1:11434/api/generate",
+                json={"model": model, "prompt": attempt["prompt"], "stream": False,
+                      "options": {"temperature": 0.15, "num_ctx": attempt["num_ctx"]}},
+                timeout=(20, attempt["timeout"]))
+            r.raise_for_status()
+            answer = (r.json().get("response") or "").strip()
+            if not answer:
+                raise RuntimeError("Ollama returned an empty response")
+            print(json.dumps({"ai_request": "completed", "attempt": attempt_no,
+                              "response_chars": len(answer)}))
+            return answer
+        except requests.exceptions.Timeout as exc:
+            last_error = exc
+            print("Ollama request timed out on attempt", attempt_no)
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            if attempt_no == len(attempts):
+                break
+            print("Ollama request failed; retrying once:", str(exc))
+    raise RuntimeError("AI synthesis timed out or failed after bounded retry: " + str(last_error))
 
 def notify_progress(payload, event, stage, percent, message):
     gateway=os.getenv("MMV2_GATEWAY_URL","").strip()
@@ -129,7 +153,7 @@ def main():
       except Exception as exc: print("chunk timing parse warning:",str(exc))
     timing_summary={"chunks_measured":len(chunk_metrics),"transcription_seconds_sum":round(sum(float(x.get("transcription_seconds",0)) for x in chunk_metrics),2),"translation_seconds_sum":round(sum(float(x.get("translation_seconds",0)) for x in chunk_metrics),2),"chunk_processing_seconds_sum":round(sum(float(x.get("total_seconds",0)) for x in chunk_metrics),2)}
     model=os.getenv("OLLAMA_MODEL","qwen2.5:3b")
-    notify_progress(p,"SUMMARY_STARTED","GENERATING_SUMMARY",80,"Generating a complete meeting summary from the full transcript and translation.")
+    notify_progress(p,"SUMMARY_STARTED","GENERATING_SUMMARY",80,"All audio segments are transcribed. The AI is consolidating the segment summaries into a complete meeting summary.")
     title=p.get("meeting_title") or "Meeting"
     meeting_type=p.get("meeting_type") or "General Meeting"
     subtype=p.get("meeting_subtype") or "General"
@@ -140,6 +164,8 @@ def main():
     previous_context_text=previous_context.get("context_text","") if context_mode!="fresh" else ""
     if not previous_context_text:
       previous_context_text="No previous meeting context attached."
+    # Keep historical context useful but bounded so it cannot overwhelm the model context.
+    previous_context_text = previous_context_text[:12000]
     type_key=meeting_type.lower()
     if "legal" in type_key:
       output_profile="LEGAL CLIENT MEETING: integrate the current discussion with matching prior case history. Preserve chronology, prior decisions, client instructions, evidence/document status, unresolved issues, deadlines and commitments. Explicitly distinguish prior facts from new developments and flag conflicts or uncertain status."
@@ -149,10 +175,12 @@ def main():
       output_profile="NOTES: produce a concise, easy-to-scan summary of important points, decisions, names/numbers, follow-ups and unresolved items; do not force formal MoM headings if they add no value."
     else:
       output_profile="BUSINESS / GENERAL MEETING: produce a standalone summary and formal MoM, compare current discussion with prior commitments, and carry forward unresolved tasks with original owner/deadline where available."
-    # Include the full translated meeting when possible so the summary is about the entire discussion,
-    # not just keyword-selected action sentences. Keep a bounded context for the configured local model.
-    translation_context=tr[:100000]
-    context_note="" if len(tr)<=100000 else "\nNOTE: Translation exceeds model context budget; use the full chronological chunk summaries for remaining material and do not claim details not present in context."
+    # The full transcript and translation are retained as deliverables. Final synthesis uses
+    # chronological per-chunk summaries to avoid a single oversized prompt timing out Ollama.
+    # These summaries were produced from each complete chunk, so synthesis remains hierarchical.
+    chunk_summary_context = chunk_summaries[:24000]
+    if not chunk_summary_context.strip():
+      raise RuntimeError("Chunk summaries are missing; refusing to generate an unsupported final summary.")
     base=f"""You are an accurate professional meeting analyst. Do not invent facts.
 MEETING TITLE: {title}
 MEETING ID: {p.get('meeting_id','')}
@@ -175,14 +203,12 @@ For legal workflow stages, apply the requested stage:
 - Stage 2 — Document Verification: referenced evidence/documents, verification status, inconsistencies and missing records. Do not claim to verify files that were not supplied.
 - Stage 3 — Legal Drafting: prepare a suitable draft from supported facts, flag assumptions and unresolved facts; do not fabricate authorities or legal citations.
 For all other meeting types, tailor structure to the subtype and agenda.
-CHRONOLOGICAL CHUNK SUMMARIES:
-{chunk_summaries[:30000]}
-FULL ENGLISH TRANSLATION (timestamps retained where available):
-{translation_context}{context_note}
+CHRONOLOGICAL CHUNK SUMMARIES (summaries of the complete audio segments; preserve chronology and source details):
+{chunk_summary_context}
 """
     summary=ollama(base+"""
 Create a COMPLETE STANDALONE SUMMARY for a person who does not want formal minutes. Follow the OUTPUT PROFILE. Cover the current meeting's full content and use prior context only to explain continuity, prior commitments and changes. For legal meetings, combine relevant previous and current case discussions into a clear chronology while separating prior and new information. For lectures, provide topic-wise concept explanations, points to remember and expected questions. For notes, emphasize concise important points. Cover purpose, major topics, explanations, conclusions, decisions, unresolved questions, risks, action items with owner/deadline only where stated, and next steps. Preserve names, numbers and distinctions. Clearly mark unknowns. Do not fabricate.""",model)
-    notify_progress(p,"MOM_STARTED","GENERATING_MOM",86,"Generating formal Minutes of Meeting and stage-specific content.")
+    notify_progress(p,"MOM_STARTED","GENERATING_MOM",86,"Standalone summary prepared. The AI is formatting the formal MoM or topic-wise learning notes.")
     mom=ollama(base+f"""
 Follow the OUTPUT PROFILE and create the appropriate structured second output, distinct from the standalone summary. For business/general meetings, create formal, circulation-ready MoM with metadata, agenda, attendees, discussion, decisions, action items, owners/deadlines/status where supported, risks, open questions and next steps. For Notes, create clean organized notes with important points and action items. For Lectures/Training, create lecture notes with topic-wise explanations, key concepts, examples when present, points to remember, revision questions and expected exam questions. For Legal meetings, create a consolidated prior-plus-current case meeting record with chronology, prior decisions, new developments, open issues, action-item status, owners/deadlines and stage-specific sections. Clearly distinguish historical facts from current discussion. Never mark a prior task completed unless completion is confirmed; use 'Pending verification' where unclear. Never invent attendees, dates, commitments, facts or legal authorities. Use 'Not specified' when needed. Make the selected legal workflow stage explicit.
 STANDALONE MEETING SUMMARY:
