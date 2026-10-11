@@ -149,7 +149,7 @@ def make_word(path, meeting, mom_text, summary):
       doc.add_paragraph("")
 
     def split_pipe(line):
-      return [cell.strip().replace("\\\\|","|") for cell in line.strip().strip("|").split("|")]
+      return [cell.strip().replace("\\|","|") for cell in line.strip().strip("|").split("|")]
 
     def flush_table():
       nonlocal table_rows
