@@ -130,6 +130,13 @@ def render(rows):
         for row in rows
     )
 
+def offset_summary_timestamps(text, offset_seconds):
+    def shift(match):
+        start = float(match.group(1)) + offset_seconds
+        end = float(match.group(2)) + offset_seconds
+        return f"[{start:07.2f}-{end:07.2f}]"
+    return re.sub(r"\\[(\\d+(?:\\.\\d+)?)-(\\d+(?:\\.\\d+)?)\\]", shift, text)
+
 def summarize_chunk(translated, language, model):
     text = render(translated)
     if not text.strip():
@@ -185,6 +192,7 @@ def main():
 
     summary_started = time.monotonic()
     note = summarize_chunk(translated, language, translation_model)
+    note = offset_summary_timestamps(note, args.index * 600)
     summary_seconds = time.monotonic() - summary_started
     (out / f"chunk_{args.index:04d}_summary.txt").write_text(note, encoding="utf-8")
 
