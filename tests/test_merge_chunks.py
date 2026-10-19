@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from src.finalize import merge_chunks
+from src.processor import offset_summary_timestamps
 
 
 class MergeChunkRegressionTests(unittest.TestCase):
@@ -39,6 +40,12 @@ class MergeChunkRegressionTests(unittest.TestCase):
             merged = merge_chunks(out, "translation.txt")
             self.assertIn("[0600.00-0602.00] Third translated sentence", merged)
             self.assertEqual(sum("translated sentence" in line for line in merged.splitlines()), 3)
+
+    def test_chunk_summary_timestamps_use_global_meeting_timeline(self):
+        note = "Decision [0000.50-0003.25] confirmed; follow-up [0010.00-0011.00]."
+        shifted = offset_summary_timestamps(note, 600)
+        self.assertIn("[0600.50-0603.25]", shifted)
+        self.assertIn("[0610.00-0611.00]", shifted)
 
 
 if __name__ == "__main__":
