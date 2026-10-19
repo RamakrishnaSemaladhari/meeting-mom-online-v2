@@ -23,6 +23,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      payload_file_id: ${{ steps.matrix.outputs.payload_file_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -115,10 +116,13 @@ jobs:
           p=json.load(open("payload.json")); d=DriveClient(); items=[]
           for i,f in enumerate(sorted(glob.glob("chunks/chunk_*.m4a"))):
               meta=d.upload(f,f"MMV2-{p['meeting_id']}-chunk-{i:04d}.m4a",p["chunk_folder_id"],"audio/mp4")
-              items.append({"index":i,"file_id":meta["id"]})
+              items.append({"index":i,"file_id":meta["id"],"folder_id":p["chunk_folder_id"]})
           p["chunk_file_ids"]=[x["file_id"] for x in items]
           open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
+          payload_meta=d.upload("payload.json",f"MMV2-{p['meeting_id']}-payload.json",p["chunk_folder_id"],"application/json")
           open("matrix.json","w").write(json.dumps({"include":items},separators=(",",":")))
+          with open(os.environ["GITHUB_OUTPUT"],"a") as output:
+              output.write("payload_file_id="+payload_meta["id"]+"\n")
           PY
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
       - name: Notify Control Tower — chunks prepared
@@ -139,11 +143,6 @@ jobs:
                   urllib.request.urlopen(req,timeout=20).read()
               except Exception as e: print("callback warning:",e)
           PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: prepared-${{ github.run_id }}
-          path: payload.json
-          retention-days: 1
 
   process-chunks:
     needs: prepare
@@ -182,7 +181,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper processing started for chunk "+os.environ.get("CHUNK_INDEX","")}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper transcription, text translation and chunk analysis started for chunk "+os.environ.get("CHUNK_INDEX","")}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -190,19 +189,38 @@ jobs:
                   urllib.request.urlopen(req,timeout=20).read()
               except Exception as e: print("callback warning:",e)
           PY
-      - name: Process chunk
+      - name: Install Ollama and prepare text-translation model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve >/tmp/ollama-translation.log 2>&1 &
+          for i in $(seq 1 45); do ollama list >/dev/null 2>&1 && break; sleep 2; done
+          ollama pull "${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}"
+      - name: Transcribe once, translate timestamped text, and summarize chunk
         env:
           WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'small' }}
           WHISPER_COMPUTE_TYPE: int8
           WHISPER_BEAM_SIZE: ${{ vars.WHISPER_BEAM_SIZE || '3' }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
         run: |
           mkdir -p result
           python src/processor.py --audio chunk.m4a --index "${{ matrix.index }}" --out result
-      - uses: actions/upload-artifact@v4
-        with:
-          name: chunk-${{ matrix.index }}-${{ github.run_id }}
-          path: result/
-          retention-days: 1
+      - name: Store chunk results in restricted Drive temp folder
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          CHUNK_FOLDER_ID: ${{ matrix.folder_id }}
+        run: |
+          python - <<'PY'
+          import os,glob
+          from pathlib import Path
+          from src.drive import DriveClient
+          drive=DriveClient()
+          for filename in sorted(glob.glob("result/*")):
+              path=Path(filename)
+              mime="application/json" if path.suffix==".json" else "text/plain; charset=utf-8"
+              drive.upload(str(path),path.name,os.environ["CHUNK_FOLDER_ID"],mime)
+          PY
 
   finalize:
     needs: [prepare, process-chunks]
@@ -216,17 +234,31 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Download prepared payload
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-${{ github.run_id }}
-          path: prepared
-      - name: Download all chunk results
-        uses: actions/download-artifact@v4
-        with:
-          pattern: chunk-*-${{ github.run_id }}
-          path: result
-          merge-multiple: true
+      - name: Download prepared payload and chunk results from restricted Drive temp folder
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          PAYLOAD_FILE_ID: ${{ needs.prepare.outputs.payload_file_id }}
+        run: |
+          mkdir -p prepared result
+          python - <<'PY'
+          import json,os
+          from src.drive import DriveClient
+          drive=DriveClient()
+          drive.download(os.environ["PAYLOAD_FILE_ID"],"prepared/payload.json")
+          payload=json.load(open("prepared/payload.json",encoding="utf-8"))
+          allowed=("_transcript.txt","_translation.txt","_summary.txt",".json")
+          for item in drive.list_children(payload["chunk_folder_id"]):
+              name=item.get("name","")
+              if name.startswith("chunk_") and name.endswith(allowed):
+                  drive.download(item["id"],"result/"+name)
+          required=payload.get("chunk_file_ids",[])
+          expected=len(required)
+          actual=len(list(__import__("pathlib").Path("result").glob("chunk_*_transcript.txt")))
+          if actual != expected:
+              raise SystemExit(f"Expected {expected} chunk transcripts but found {actual}")
+          PY
       - name: Notify Control Tower — chunks completed
         env:
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
@@ -236,7 +268,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All Whisper chunk jobs completed. Starting finalization."}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All chunk transcription, English translation and AI notes completed. Starting final synthesis."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -282,11 +314,7 @@ jobs:
               except Exception as e: print("callback warning:",e)
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: meeting-mom-v2-output-${{ github.run_id }}
-          path: result/
-          retention-days: 1
+
 
   report-failure:
     needs: [prepare, process-chunks, finalize]

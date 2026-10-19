@@ -59,14 +59,48 @@ def merge_chunks(out, suffix):
         match=re.search(r"chunk_(\d+)_",path.name)
         offset=(int(match.group(1))*600) if match else 0
         for line in path.read_text(encoding="utf-8").splitlines():
-            stamp=re.match(r"^\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\](.*)$",line)
-            if stamp:
-                start=float(stamp.group(1))+offset; end=float(stamp.group(2))+offset
-                merged.append(f"[{start:07.2f}-{end:07.2f}]{stamp.group(3)}")
-            else:
-                merged.append(line)
+            # Timestamps can lead transcript lines or appear inline in AI summaries.
+            # Offset every timestamp exactly once during final merge.
+            def offset_timestamp(stamp):
+                start=float(stamp.group(1))+offset
+                end=float(stamp.group(2))+offset
+                return f"[{start:07.2f}-{end:07.2f}]"
+            merged.append(re.sub(r"\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\]", offset_timestamp, line))
         merged.append("")
     return "\n".join(merged).strip()
+
+def reduce_chunk_summaries(summary_paths, model, max_chars=9000):
+    """Hierarchically compress ordered chunk notes without dropping later chunks."""
+    items = [
+        {"label": path.stem, "text": path.read_text(encoding="utf-8").strip()}
+        for path in sorted(summary_paths)
+    ]
+    if not items or any(not item["text"] for item in items):
+        raise RuntimeError("One or more chunk AI summaries are missing or empty.")
+    round_no = 0
+    while sum(len(item["text"]) for item in items) > max_chars:
+        round_no += 1
+        if round_no > 5:
+            raise RuntimeError("Could not reduce all chunk summaries to the safe prompt budget.")
+        grouped = []
+        for start in range(0, len(items), 3):
+            group = items[start:start + 3]
+            source = "\n\n".join(
+                f"ORDERED SOURCE {item['label']}\n{item['text']}" for item in group
+            )
+            prompt = f"""Consolidate these chronological meeting-chunk notes into a faithful, concise intermediate summary.
+Preserve order, explanations, names, numbers, decisions, actions, owners, deadlines, risks and unresolved questions.
+Keep timestamps when present. Do not invent facts. Do not omit later sources because they conflict with earlier ones.
+This is an intermediate summary, not final MoM.
+{source[:18000]}"""
+            grouped.append({
+                "label": f"reduction_{round_no}_{start // 3 + 1}",
+                "text": ollama(prompt, model),
+            })
+        items = grouped
+    return "\n\n".join(
+        f"CHRONOLOGICAL NOTES {item['label']}\n{item['text']}" for item in items
+    )
 
 def make_word(path, meeting, mom_text, summary):
     doc=Document()
@@ -195,13 +229,13 @@ def main():
     o=Path(a.out); o.mkdir(parents=True,exist_ok=True)
     ts=merge_chunks(o,"transcript.txt")
     tr=merge_chunks(o,"translation.txt")
-    chunk_summaries="\n\n".join("CHUNK "+str(i+1)+"\n"+x.read_text(encoding="utf-8") for i,x in enumerate(sorted(o.glob("chunk_*_summary.txt"))))
+    summary_paths=sorted(o.glob("chunk_*_summary.txt"))
     if not ts.strip() or not tr.strip(): raise RuntimeError("Transcript or English translation is empty; refusing to complete meeting.")
     chunk_metrics=[]
     for metric_path in sorted(o.glob("chunk_*.json")):
       try: chunk_metrics.append(json.loads(metric_path.read_text(encoding="utf-8")))
       except Exception as exc: print("chunk timing parse warning:",str(exc))
-    timing_summary={"chunks_measured":len(chunk_metrics),"transcription_seconds_sum":round(sum(float(x.get("transcription_seconds",0)) for x in chunk_metrics),2),"translation_seconds_sum":round(sum(float(x.get("translation_seconds",0)) for x in chunk_metrics),2),"chunk_processing_seconds_sum":round(sum(float(x.get("total_seconds",0)) for x in chunk_metrics),2)}
+    timing_summary={"chunks_measured":len(chunk_metrics),"transcription_seconds_sum":round(sum(float(x.get("transcription_seconds",0)) for x in chunk_metrics),2),"translation_seconds_sum":round(sum(float(x.get("translation_seconds",0)) for x in chunk_metrics),2),"chunk_summary_seconds_sum":round(sum(float(x.get("chunk_summary_seconds",0)) for x in chunk_metrics),2),"chunk_processing_seconds_sum":round(sum(float(x.get("total_seconds",0)) for x in chunk_metrics),2),"timing_note":"Per-chunk durations are summed across parallel workers; they are not workflow wall-clock elapsed time."}
     model=os.getenv("OLLAMA_MODEL","qwen2.5:3b")
     notify_progress(p,"SUMMARY_STARTED","GENERATING_SUMMARY",80,"All audio segments are transcribed. The AI is consolidating the segment summaries into a complete meeting summary.")
     title=p.get("meeting_title") or "Meeting"
@@ -215,7 +249,7 @@ def main():
     if not previous_context_text:
       previous_context_text="No previous meeting context attached."
     # Keep historical context useful but bounded so it cannot overwhelm the model context.
-    previous_context_text = previous_context_text[:12000]
+    previous_context_text = previous_context_text[:4000]
     type_key=meeting_type.lower()
     if "legal" in type_key:
       output_profile="LEGAL CLIENT MEETING: integrate the current discussion with matching prior case history. Preserve chronology, prior decisions, client instructions, evidence/document status, unresolved issues, deadlines and commitments. Explicitly distinguish prior facts from new developments and flag conflicts or uncertain status."
@@ -225,10 +259,9 @@ def main():
       output_profile="NOTES: produce a concise, easy-to-scan summary of important points, decisions, names/numbers, follow-ups and unresolved items; do not force formal MoM headings if they add no value."
     else:
       output_profile="BUSINESS / GENERAL MEETING: produce a standalone summary and formal MoM, compare current discussion with prior commitments, and carry forward unresolved tasks with original owner/deadline where available."
-    # The full transcript and translation are retained as deliverables. Final synthesis uses
-    # chronological per-chunk summaries to avoid a single oversized prompt timing out Ollama.
-    # These summaries were produced from each complete chunk, so synthesis remains hierarchical.
-    chunk_summary_context = chunk_summaries[:24000]
+    # Chunk notes are AI-generated. Reduce them in chronological groups when needed,
+    # never by truncating the tail of a long meeting.
+    chunk_summary_context = reduce_chunk_summaries(summary_paths, model, max_chars=9000)
     if not chunk_summary_context.strip():
       raise RuntimeError("Chunk summaries are missing; refusing to generate an unsupported final summary.")
     base=f"""You are an accurate professional meeting analyst. Do not invent facts.
@@ -307,12 +340,16 @@ STANDALONE MEETING SUMMARY:
     (o/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
     ids["manifest.json"]=d.upload(o/"manifest.json",f"{p['meeting_id']} - manifest.json",parent,"application/json").get("id")
     if not ids["manifest.json"]: raise RuntimeError("Manifest upload failed")
-    for chunk_id in p.get("chunk_file_ids",[]):
-      try: d.delete(chunk_id)
-      except Exception as e: print("temporary chunk cleanup warning:",e)
     if p.get("chunk_folder_id"):
-      try: d.delete(p["chunk_folder_id"])
-      except Exception as e: print("temporary folder cleanup warning:",e)
+      # Delete every temporary child (audio, payload and intermediate results) before
+      # removing the folder; deleting a Drive folder alone does not delete its contents.
+      try:
+        for item in d.list_children(p["chunk_folder_id"]):
+          try: d.delete(item["id"])
+          except Exception as e: print("temporary file cleanup warning:",e)
+        d.delete(p["chunk_folder_id"])
+      except Exception as e:
+        print("temporary folder cleanup warning:",e)
     gateway=os.getenv("MMV2_GATEWAY_URL","").strip()
     if not gateway: raise RuntimeError("MMV2_GATEWAY_URL is not configured; cannot register output files.")
     callback={
