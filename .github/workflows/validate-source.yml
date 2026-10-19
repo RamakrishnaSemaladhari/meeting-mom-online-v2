@@ -23,5 +23,9 @@ jobs:
           node-version: "20"
       - name: Compile Python sources
         run: python -m py_compile src/processor.py src/finalize.py src/drive.py
+      - name: Install Python dependencies for regression tests
+        run: pip install -r requirements.txt
+      - name: Run multi-chunk timestamp regression tests
+        run: python -m unittest discover -s tests -v
       - name: Check Apps Script JavaScript syntax
         run: cp google-apps-script/Code.gs /tmp/Code.js && node --check /tmp/Code.js
