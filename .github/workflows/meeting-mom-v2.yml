@@ -300,6 +300,7 @@ jobs:
     if: ${{ always() && (needs.prepare.result == 'failure' || needs.process-chunks.result == 'failure' || needs.finalize.result == 'failure') }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Report failure
         env:
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
