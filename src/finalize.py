@@ -234,7 +234,7 @@ def main():
     for metric_path in sorted(o.glob("chunk_*.json")):
       try: chunk_metrics.append(json.loads(metric_path.read_text(encoding="utf-8")))
       except Exception as exc: print("chunk timing parse warning:",str(exc))
-    timing_summary={"chunks_measured":len(chunk_metrics),"transcription_seconds_sum":round(sum(float(x.get("transcription_seconds",0)) for x in chunk_metrics),2),"translation_seconds_sum":round(sum(float(x.get("translation_seconds",0)) for x in chunk_metrics),2),"chunk_processing_seconds_sum":round(sum(float(x.get("total_seconds",0)) for x in chunk_metrics),2)}
+    timing_summary={"chunks_measured":len(chunk_metrics),"transcription_seconds_sum":round(sum(float(x.get("transcription_seconds",0)) for x in chunk_metrics),2),"translation_seconds_sum":round(sum(float(x.get("translation_seconds",0)) for x in chunk_metrics),2),"chunk_summary_seconds_sum":round(sum(float(x.get("chunk_summary_seconds",0)) for x in chunk_metrics),2),"chunk_processing_seconds_sum":round(sum(float(x.get("total_seconds",0)) for x in chunk_metrics),2),"timing_note":"Per-chunk durations are summed across parallel workers; they are not workflow wall-clock elapsed time."}
     model=os.getenv("OLLAMA_MODEL","qwen2.5:3b")
     notify_progress(p,"SUMMARY_STARTED","GENERATING_SUMMARY",80,"All audio segments are transcribed. The AI is consolidating the segment summaries into a complete meeting summary.")
     title=p.get("meeting_title") or "Meeting"
