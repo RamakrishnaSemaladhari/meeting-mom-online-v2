@@ -60,7 +60,7 @@ def ollama_generate(prompt, model, timeout=240, json_mode=False):
         raise RuntimeError("Ollama returned an empty response")
     return answer
 
-def batches(rows, max_segments=12, max_chars=4200):
+def batches(rows, max_segments=24, max_chars=6500):
     batch, chars = [], 0
     for row in rows:
         size = len(row["text"])
