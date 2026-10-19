@@ -7,7 +7,18 @@ class DriveClient:
   self.client_id=os.environ["GOOGLE_CLIENT_ID"]; self.client_secret=os.environ["GOOGLE_CLIENT_SECRET"]; self.refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"]; self.access_token=None
  def token(self):
   if self.access_token:return self.access_token
-  r=requests.post(TOKEN_URL,data={"client_id":self.client_id,"client_secret":self.client_secret,"refresh_token":self.refresh_token,"grant_type":"refresh_token"},timeout=60);r.raise_for_status();self.access_token=r.json()["access_token"];return self.access_token
+  r=requests.post(TOKEN_URL,data={"client_id":self.client_id,"client_secret":self.client_secret,"refresh_token":self.refresh_token,"grant_type":"refresh_token"},timeout=60)
+  if not r.ok:
+   # Google returns a structured OAuth error; log only the error code/description, never credentials.
+   try:
+    body=r.json(); code=str(body.get("error","unknown")); detail=str(body.get("error_description",""))
+   except Exception:
+    code="non_json_error"; detail="Google returned a non-JSON OAuth error response"
+   raise RuntimeError(f"Google OAuth token refresh failed (HTTP {r.status_code}; error={code}; description={detail[:500]})")
+  data=r.json()
+  if not data.get("access_token"):
+   raise RuntimeError("Google OAuth token refresh response did not include access_token")
+  self.access_token=data["access_token"];return self.access_token
  def headers(self):return {"Authorization":"Bearer "+self.token()}
  def get_meta(self,file_id):
   r=requests.get(f"{DRIVE}/files/{file_id}",params={"fields":"id,name,mimeType,size,parents"},headers=self.headers(),timeout=60);r.raise_for_status();return r.json()
