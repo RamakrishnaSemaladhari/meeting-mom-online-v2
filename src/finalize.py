@@ -84,8 +84,8 @@ def reduce_chunk_summaries(summary_paths, model, max_chars=9000):
         grouped = []
         for start in range(0, len(items), 3):
             group = items[start:start + 3]
-            source = "\\n\\n".join(
-                f"ORDERED SOURCE {item['label']}\\n{item['text']}" for item in group
+            source = "\n\n".join(
+                f"ORDERED SOURCE {item['label']}\n{item['text']}" for item in group
             )
             prompt = f"""Consolidate these chronological meeting-chunk notes into a faithful, concise intermediate summary.
 Preserve order, explanations, names, numbers, decisions, actions, owners, deadlines, risks and unresolved questions.
@@ -97,8 +97,8 @@ This is an intermediate summary, not final MoM.
                 "text": ollama(prompt, model),
             })
         items = grouped
-    return "\\n\\n".join(
-        f"CHRONOLOGICAL NOTES {item['label']}\\n{item['text']}" for item in items
+    return "\n\n".join(
+        f"CHRONOLOGICAL NOTES {item['label']}\n{item['text']}" for item in items
     )
 
 def make_word(path, meeting, mom_text, summary):
