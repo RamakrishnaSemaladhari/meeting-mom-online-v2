@@ -261,6 +261,7 @@ def main():
     # Chunk notes are AI-generated. Reduce them in chronological groups when needed,
     # never by truncating the tail of a long meeting.
     chunk_summary_context = reduce_chunk_summaries(summary_paths, model, max_chars=9000)
+    if not chunk_summary_context.strip():
       raise RuntimeError("Chunk summaries are missing; refusing to generate an unsupported final summary.")
     base=f"""You are an accurate professional meeting analyst. Do not invent facts.
 MEETING TITLE: {title}
