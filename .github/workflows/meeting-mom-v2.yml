@@ -122,7 +122,7 @@ jobs:
           payload_meta=d.upload("payload.json",f"MMV2-{p['meeting_id']}-payload.json",p["chunk_folder_id"],"application/json")
           open("matrix.json","w").write(json.dumps({"include":items},separators=(",",":")))
           with open(os.environ["GITHUB_OUTPUT"],"a") as output:
-              output.write("payload_file_id="+payload_meta["id"]+"\\n")
+              output.write("payload_file_id="+payload_meta["id"]+"\n")
           PY
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
       - name: Notify Control Tower — chunks prepared
