@@ -339,12 +339,16 @@ STANDALONE MEETING SUMMARY:
     (o/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
     ids["manifest.json"]=d.upload(o/"manifest.json",f"{p['meeting_id']} - manifest.json",parent,"application/json").get("id")
     if not ids["manifest.json"]: raise RuntimeError("Manifest upload failed")
-    for chunk_id in p.get("chunk_file_ids",[]):
-      try: d.delete(chunk_id)
-      except Exception as e: print("temporary chunk cleanup warning:",e)
     if p.get("chunk_folder_id"):
-      try: d.delete(p["chunk_folder_id"])
-      except Exception as e: print("temporary folder cleanup warning:",e)
+      # Delete every temporary child (audio, payload and intermediate results) before
+      # removing the folder; deleting a Drive folder alone does not delete its contents.
+      try:
+        for item in d.list_children(p["chunk_folder_id"]):
+          try: d.delete(item["id"])
+          except Exception as e: print("temporary file cleanup warning:",e)
+        d.delete(p["chunk_folder_id"])
+      except Exception as e:
+        print("temporary folder cleanup warning:",e)
     gateway=os.getenv("MMV2_GATEWAY_URL","").strip()
     if not gateway: raise RuntimeError("MMV2_GATEWAY_URL is not configured; cannot register output files.")
     callback={
