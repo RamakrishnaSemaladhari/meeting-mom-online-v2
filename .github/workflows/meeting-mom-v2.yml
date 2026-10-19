@@ -190,11 +190,18 @@ jobs:
                   urllib.request.urlopen(req,timeout=20).read()
               except Exception as e: print("callback warning:",e)
           PY
-      - name: Process chunk
+      - name: Install Ollama and prepare text-translation model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve >/tmp/ollama-translation.log 2>&1 &
+          for i in $(seq 1 45); do ollama list >/dev/null 2>&1 && break; sleep 2; done
+          ollama pull "${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}"
+      - name: Transcribe once, translate timestamped text, and summarize chunk
         env:
           WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'small' }}
           WHISPER_COMPUTE_TYPE: int8
           WHISPER_BEAM_SIZE: ${{ vars.WHISPER_BEAM_SIZE || '3' }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
         run: |
           mkdir -p result
           python src/processor.py --audio chunk.m4a --index "${{ matrix.index }}" --out result
