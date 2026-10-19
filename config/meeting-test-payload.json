@@ -1,0 +1,16 @@
+{
+  "meeting_id": "MMV2-BACKEND-TEST-20261020-001",
+  "audio_file_id": "1IvvsbDJcoNi5auViP8VWhGUEnQyOMdCK",
+  "meeting_title": "Meeting Audio Processing Test",
+  "meeting_type": "Business",
+  "meeting_subtype": "General",
+  "workflow_stage": "Standard",
+  "context_mode": "fresh",
+  "processing_mode": "fresh",
+  "meeting_date": "2026-10-20",
+  "start_time": "",
+  "end_time": "",
+  "venue": "Online",
+  "meeting_mode": "ONLINE",
+  "agenda": "Generate the source-language transcript, English translation, full meeting summary, structured minutes of meeting, editable Word document, and manifest from the supplied recording."
+}
