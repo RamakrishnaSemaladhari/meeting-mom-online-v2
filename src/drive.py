@@ -23,6 +23,16 @@ class DriveClient:
   meta={"name":name,"mimeType":"application/vnd.google-apps.folder"}
   if parent_id:meta["parents"]=[parent_id]
   r=requests.post(f"{DRIVE}/files",headers={**self.headers(),"Content-Type":"application/json"},json=meta,timeout=60);r.raise_for_status();return r.json()
+ def list_children(self,folder_id):
+  files=[]; token=None
+  while True:
+   params={"q":f"'{folder_id}' in parents and trashed = false","pageSize":1000,
+           "fields":"nextPageToken,files(id,name,mimeType,size)"}
+   if token:params["pageToken"]=token
+   r=requests.get(f"{DRIVE}/files",params=params,headers=self.headers(),timeout=60);r.raise_for_status()
+   page=r.json();files.extend(page.get("files",[]));token=page.get("nextPageToken")
+   if not token:break
+  return files
  def delete(self,file_id):
   r=requests.delete(f"{DRIVE}/files/{file_id}",headers=self.headers(),timeout=60);r.raise_for_status()
  def upload(self,path,name,parent_id,mime):
