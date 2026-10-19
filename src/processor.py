@@ -192,7 +192,6 @@ def main():
 
     summary_started = time.monotonic()
     note = summarize_chunk(translated, language, translation_model)
-    note = offset_summary_timestamps(note, args.index * 600)
     summary_seconds = time.monotonic() - summary_started
     (out / f"chunk_{args.index:04d}_summary.txt").write_text(note, encoding="utf-8")
 
