@@ -181,7 +181,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper processing started for chunk "+os.environ.get("CHUNK_INDEX","")}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper transcription, text translation and chunk analysis started for chunk "+os.environ.get("CHUNK_INDEX","")}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -268,7 +268,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All Whisper chunk jobs completed. Starting finalization."}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or "{}").get("meeting_id",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All chunk transcription, English translation and AI notes completed. Starting final synthesis."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
