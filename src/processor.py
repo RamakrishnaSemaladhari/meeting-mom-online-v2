@@ -135,7 +135,7 @@ def offset_summary_timestamps(text, offset_seconds):
         start = float(match.group(1)) + offset_seconds
         end = float(match.group(2)) + offset_seconds
         return f"[{start:07.2f}-{end:07.2f}]"
-    return re.sub(r"\\[(\\d+(?:\\.\\d+)?)-(\\d+(?:\\.\\d+)?)\\]", shift, text)
+    return re.sub(r"\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\]", shift, text)
 
 def summarize_chunk(translated, language, model):
     text = render(translated)
