@@ -42,9 +42,13 @@ jobs:
         run: |
           python - <<'PY'
           import json,os
-          raw=os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")
+          raw=os.environ.get("MANUAL_PAYLOAD") or "{}"
           p=json.loads(raw)
-          if not p.get("meeting_id") or not p.get("audio_file_id"):
+          if not isinstance(p,dict) or not p.get("meeting_id"):
+              p=json.loads(os.environ.get("EVENT_PAYLOAD") or "{}")
+          if not isinstance(p,dict) or not p.get("meeting_id"):
+              p=json.load(open("config/meeting-test-payload.json",encoding="utf-8"))
+          if not isinstance(p,dict) or not p.get("meeting_id") or not p.get("audio_file_id"):
               raise SystemExit("meeting_id and audio_file_id are required")
           open("payload.json","w",encoding="utf-8").write(json.dumps(p,ensure_ascii=False,indent=2))
           PY
@@ -57,7 +61,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")).get("meeting_id",""),"event":"WORKFLOW_STARTED","stage":"PREPARE","progress_percent":8,"status":"PROCESSING","message":"GitHub Actions workflow started."}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":(json.loads(os.environ.get("MANUAL_PAYLOAD") or "{}") or json.loads(os.environ.get("EVENT_PAYLOAD") or "{}") or json.load(open("config/meeting-test-payload.json",encoding="utf-8"))).get("meeting_id",""),"event":"WORKFLOW_STARTED","stage":"PREPARE","progress_percent":8,"status":"PROCESSING","message":"GitHub Actions workflow started."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -91,7 +95,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")).get("meeting_id",""),"event":"AUDIO_DOWNLOADED","stage":"AUDIO_PREPARATION","progress_percent":15,"status":"PROCESSING","message":"Source audio downloaded from Google Drive."}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":(json.loads(os.environ.get("MANUAL_PAYLOAD") or "{}") or json.loads(os.environ.get("EVENT_PAYLOAD") or "{}") or json.load(open("config/meeting-test-payload.json",encoding="utf-8"))).get("meeting_id",""),"event":"AUDIO_DOWNLOADED","stage":"AUDIO_PREPARATION","progress_percent":15,"status":"PROCESSING","message":"Source audio downloaded from Google Drive."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -185,7 +189,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")).get("meeting_id",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper processing started for chunk "+os.environ.get("CHUNK_INDEX","")}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":(json.loads(os.environ.get("MANUAL_PAYLOAD") or "{}") or json.loads(os.environ.get("EVENT_PAYLOAD") or "{}") or json.load(open("config/meeting-test-payload.json",encoding="utf-8"))).get("meeting_id",""),"event":"CHUNK_PROCESSING","stage":"WHISPER","progress_percent":40,"status":"PROCESSING","chunk_no":os.environ.get("CHUNK_INDEX",""),"message":"Whisper processing started for chunk "+os.environ.get("CHUNK_INDEX","")}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -239,7 +243,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")).get("meeting_id",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All Whisper chunk jobs completed. Starting finalization."}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":(json.loads(os.environ.get("MANUAL_PAYLOAD") or "{}") or json.loads(os.environ.get("EVENT_PAYLOAD") or "{}") or json.load(open("config/meeting-test-payload.json",encoding="utf-8"))).get("meeting_id",""),"event":"CHUNKS_COMPLETED","stage":"FINALIZATION","progress_percent":75,"status":"PROCESSING","message":"All Whisper chunk jobs completed. Starting finalization."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -276,7 +280,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")).get("meeting_id",""),"event":"FINALIZATION_COMPLETE","stage":"FINALIZATION","progress_percent":95,"status":"PROCESSING","message":"Final MoM generation and Drive upload completed."}
+          p={"action":"processing_event","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":(json.loads(os.environ.get("MANUAL_PAYLOAD") or "{}") or json.loads(os.environ.get("EVENT_PAYLOAD") or "{}") or json.load(open("config/meeting-test-payload.json",encoding="utf-8"))).get("meeting_id",""),"event":"FINALIZATION_COMPLETE","stage":"FINALIZATION","progress_percent":95,"status":"PROCESSING","message":"Final MoM generation and Drive upload completed."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url:
               try:
@@ -305,7 +309,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          p={"action":"fail_meeting","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":json.loads(os.environ.get("MANUAL_PAYLOAD") or os.environ.get("EVENT_PAYLOAD") or (open("config/meeting-test-payload.json",encoding="utf-8").read() if os.path.exists("config/meeting-test-payload.json") else "{}")).get("meeting_id",""),"error_code":"GITHUB_PROCESSING_FAILED","error_message":"One or more V2 processing stages failed."}
+          p={"action":"fail_meeting","callback_secret":os.environ.get("MMV2_CALLBACK_SECRET",""),"meeting_id":(json.loads(os.environ.get("MANUAL_PAYLOAD") or "{}") or json.loads(os.environ.get("EVENT_PAYLOAD") or "{}") or json.load(open("config/meeting-test-payload.json",encoding="utf-8"))).get("meeting_id",""),"error_code":"GITHUB_PROCESSING_FAILED","error_message":"One or more V2 processing stages failed."}
           url=os.environ.get("MMV2_GATEWAY_URL","")
           if url and p["meeting_id"]:
               try:
