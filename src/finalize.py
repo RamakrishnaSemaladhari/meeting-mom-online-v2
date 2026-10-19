@@ -59,12 +59,13 @@ def merge_chunks(out, suffix):
         match=re.search(r"chunk_(\d+)_",path.name)
         offset=(int(match.group(1))*600) if match else 0
         for line in path.read_text(encoding="utf-8").splitlines():
-            stamp=re.match(r"^\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\](.*)$",line)
-            if stamp:
-                start=float(stamp.group(1))+offset; end=float(stamp.group(2))+offset
-                merged.append(f"[{start:07.2f}-{end:07.2f}]{stamp.group(3)}")
-            else:
-                merged.append(line)
+            # Timestamps can lead transcript lines or appear inline in AI summaries.
+            # Offset every timestamp exactly once during final merge.
+            def offset_timestamp(stamp):
+                start=float(stamp.group(1))+offset
+                end=float(stamp.group(2))+offset
+                return f"[{start:07.2f}-{end:07.2f}]"
+            merged.append(re.sub(r"\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\]", offset_timestamp, line))
         merged.append("")
     return "\n".join(merged).strip()
 
