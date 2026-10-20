@@ -71,9 +71,9 @@ jobs:
           PY
       - name: Download source audio from Drive
         env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.MMV2_GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: |
           python - <<'PY'
           import json
@@ -112,9 +112,9 @@ jobs:
       - name: Upload temporary chunks to Drive and create matrix
         id: matrix
         env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.MMV2_GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: |
           python - <<'PY'
           import json,glob,os
@@ -169,9 +169,9 @@ jobs:
         run: pip install -r requirements.txt
       - name: Download this 10-minute chunk from Drive
         env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.MMV2_GOOGLE_OAUTH_REFRESH_TOKEN }}
           CHUNK_ID: ${{ matrix.file_id }}
         run: |
           python - <<'PY'
@@ -260,9 +260,9 @@ jobs:
           ollama pull "${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}"
       - name: Synthesize, upload and clean temporary chunks
         env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.MMV2_GOOGLE_OAUTH_REFRESH_TOKEN }}
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
           MMV2_CALLBACK_SECRET: ${{ secrets.MMV2_CALLBACK_SECRET }}
           OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'qwen2.5:3b' }}
