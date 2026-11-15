@@ -1,34 +1,67 @@
-# Meeting MoM Online V2 — Dedicated Google OAuth Setup
+# Meeting MoM Online V2 — Google Drive OAuth Setup and Recovery
 
-V2 must use its own Google OAuth client and refresh token. Do not reuse V1 credentials.
+V2 uses a dedicated Google OAuth client and three dedicated GitHub Actions repository secrets. Do not reuse V1 credentials.
 
-## Dedicated GitHub Actions secrets
+## Required V2 repository secrets
 
-Create these three **repository secrets** in `RamakrishnaSemaladhari/meeting-mom-online-v2`:
+Repository: `RamakrishnaSemaladhari/meeting-mom-online-v2`
 
 - `MMV2_GOOGLE_OAUTH_CLIENT_ID`
 - `MMV2_GOOGLE_OAUTH_CLIENT_SECRET`
 - `MMV2_GOOGLE_OAUTH_REFRESH_TOKEN`
 
-The V2 workflow now reads only these dedicated names for Drive authentication. Keep `MMV2_GATEWAY_URL` and `MMV2_CALLBACK_SECRET` unchanged.
+The processing workflow maps these secrets to the standard environment variable names expected by `src/drive.py`. The V2 Connection Test workflow uses the same three V2 secret names.
 
-## Create a new OAuth client in Google Cloud
+Keep these existing secrets unchanged:
 
-1. Open https://console.cloud.google.com/ and create/select a project named **Meeting MoM V2**. Keep it separate from any V1 project.
-2. Under **APIs & Services → Library**, enable **Google Drive API**.
-3. Under **Google Auth Platform** (or **APIs & Services → OAuth consent screen**), configure the app. If the app is External and in Testing, add the Google account that owns the meeting audio as a test user.
-4. Under **Clients**, create an OAuth client. Choose **Desktop app** for a user-authorized local token-generation flow, and save the client ID and client secret securely.
-5. Generate a refresh token for this exact client using Google's OAuth flow with the scope `https://www.googleapis.com/auth/drive`. The Google account used for consent must have access to the target audio and the output folders. Do not paste credentials into chat, source code, or commits.
-6. In the V2 repository, open **Settings → Secrets and variables → Actions → New repository secret**. Add the three secret names above with the values from this new V2 client and its newly generated refresh token.
+- `MMV2_GATEWAY_URL`
+- `MMV2_CALLBACK_SECRET`
 
-## Validation
+## One-time Google setup
 
-After all three secrets are added, run the **Meeting MoM Online V2** workflow. The first check should be the Drive OAuth token refresh and file metadata lookup. A successful token refresh alone is not enough; the audio download and final output uploads must also succeed.
+1. Open [Google Cloud Console](https://console.cloud.google.com/), select the project used by Meeting MoM V2, and enable **Google Drive API**.
+2. Configure Google Auth Platform / OAuth consent screen. If the app is External, publish it to **In production** when appropriate. Leaving an External app in Testing can cause refresh tokens to expire after seven days.
+3. Create an OAuth client of type **Desktop app**.
+4. Download the OAuth client JSON to a trusted Windows computer. Do not commit it to this repository or upload it to a public location.
+5. Use the supplied `REPAIR_MMV2_GOOGLE_AUTH.bat` and `MMV2_AUTH_REPAIR.py` helper files from the conversation download. The helper opens Google's consent page, requests offline Drive access, validates a refresh-token exchange and a Drive API list call, then writes the three values directly to GitHub Actions secrets using GitHub CLI.
+6. The Google account used in consent must have access to the source audio and destination folders in My Drive.
 
-If Google returns `invalid_grant`, generate a new refresh token for the same client and replace `MMV2_GOOGLE_OAUTH_REFRESH_TOKEN`. If it returns `invalid_client`, verify the V2 client ID and client secret belong to the same OAuth client.
+## GitHub CLI prerequisite
 
-## Security notes
+Install [GitHub CLI](https://cli.github.com/) and authenticate it with an account that has Admin access to this repository:
 
-- Never log or commit client secrets, refresh tokens, or access tokens.
-- Do not delete V1 secrets; V2 no longer reads their names.
-- Restrict Drive access to the account and folders needed for processing.
+```bat
+gh auth login
+```
+
+Run `REPAIR_MMV2_GOOGLE_AUTH.bat` from the folder containing the Python helper and downloaded OAuth client JSON. The helper does not print the refresh token or write it to a file. Do not share the OAuth client JSON.
+
+## Validate from GitHub Actions
+
+After the helper reports success:
+
+1. Open **Actions** in the repository.
+2. Select **V2 Connection Test**.
+3. Select **Run workflow**.
+4. Confirm these steps pass:
+   - `GOOGLE_OAUTH_REFRESH: PASS`
+   - `GOOGLE_DRIVE_API_LIST: PASS`
+   - `APPS_SCRIPT_GATEWAY: PASS`
+
+The test does not print Drive file names or IDs. It validates authentication and API access only; it does not prove that the processing workflow can download a particular recording or upload all final outputs. Run a dummy-data end-to-end test after this check.
+
+## Recovery behaviour and limitations
+
+- `invalid_grant`: Google rejected the refresh token. Re-authorise and replace `MMV2_GOOGLE_OAUTH_REFRESH_TOKEN`.
+- `invalid_client`: The client ID and client secret do not belong to the same OAuth client, or the client is invalid. Replace the pair from the same Desktop OAuth client.
+- `insufficientPermissions` / HTTP 403: Check Drive API enablement, granted scope and the Google account's access to the relevant Drive files.
+- Never log or commit client secrets, refresh tokens or access tokens.
+
+There is no guaranteed permanent Google refresh token. Google can revoke tokens or make them invalid under documented account, consent, security and token-lifetime conditions. Production publishing removes the specific Testing-mode seven-day expiry; it does not make tokens irrevocable.
+
+## Security
+
+- Keep all credentials in GitHub Actions repository secrets.
+- Never put OAuth credentials in workflow YAML, source code, test payloads, artifacts, logs or the frontend.
+- Do not use real meeting recordings as connection-test fixtures.
+- Do not print raw OAuth or Drive response bodies in workflow logs.
