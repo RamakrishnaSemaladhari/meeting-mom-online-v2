@@ -28,7 +28,7 @@ const V2 = {
   SPREADSHEET_ID_PROPERTY: 'MMV2_SPREADSHEET_ID',
   REPO: 'RamakrishnaSemaladhari/meeting-mom-online-v2',
   WORKFLOW_FILE: 'meeting-mom-v2.yml',
-  WORKFLOW_REF: 'main',
+  WORKFLOW_REF: 'poc/v2-integrated-pipeline-2026-11-22',
   WORKFLOW_INPUT_NAME: 'payload_json',
   GITHUB_TOKEN_PROPERTY: 'GITHUB_TOKEN',
   CALLBACK_SECRET_PROPERTY: 'MMV2_CALLBACK_SECRET',
