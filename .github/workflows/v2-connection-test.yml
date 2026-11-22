@@ -11,21 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Test Google OAuth and Drive
+      - name: Test existing V2 Google OAuth and Drive access
         env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.MMV2_GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: |
           python - <<'PY'
-          import os, requests
+          import os, requests, sys
 
           required = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"]
-          missing = [k for k in required if not os.environ.get(k)]
+          missing = [key for key in required if not os.environ.get(key)]
           if missing:
-              raise SystemExit("Missing GitHub secrets: " + ", ".join(missing))
+              print("MISSING_REQUIRED_V2_SECRETS:", ", ".join(missing))
+              sys.exit(1)
 
-          r = requests.post(
+          response = requests.post(
               "https://oauth2.googleapis.com/token",
               data={
                   "client_id": os.environ["GOOGLE_CLIENT_ID"],
@@ -33,51 +34,70 @@ jobs:
                   "refresh_token": os.environ["GOOGLE_REFRESH_TOKEN"],
                   "grant_type": "refresh_token",
               },
-              timeout=60,
+              timeout=45,
           )
-          if not r.ok:
-              raise SystemExit(f"Google token exchange failed: HTTP {r.status_code}: {r.text[:500]}")
+          if not response.ok:
+              try:
+                  body = response.json()
+                  error = body.get("error", "unknown")
+                  description = body.get("error_description", "No error description")
+              except Exception:
+                  error, description = "non_json_error", "Google returned a non-JSON error"
+              print(f"GOOGLE_OAUTH: FAIL (HTTP {response.status_code}; {error}: {description})")
+              sys.exit(1)
 
-          token = r.json().get("access_token")
-          if not token:
-              raise SystemExit("Google token exchange returned no access token.")
+          access_token = response.json().get("access_token")
+          if not access_token:
+              print("GOOGLE_OAUTH: FAIL (no access token returned)")
+              sys.exit(1)
 
-          d = requests.get(
+          drive = requests.get(
               "https://www.googleapis.com/drive/v3/files",
               params={"pageSize": 1, "fields": "files(id,name,mimeType)"},
-              headers={"Authorization": "Bearer " + token},
-              timeout=60,
+              headers={"Authorization": "Bearer " + access_token},
+              timeout=45,
           )
-          if not d.ok:
-              raise SystemExit(f"Google Drive API test failed: HTTP {d.status_code}: {d.text[:500]}")
+          if not drive.ok:
+              try:
+                  detail = drive.json().get("error", {}).get("message", "Drive API request failed")
+              except Exception:
+                  detail = "Drive API returned a non-JSON error"
+              print(f"GOOGLE_DRIVE_API: FAIL (HTTP {drive.status_code}; {detail})")
+              sys.exit(1)
 
-          files = d.json().get("files", [])
           print("GOOGLE_OAUTH: PASS")
-          print("GOOGLE_DRIVE_API: PASS")
-          print("Drive API returned successfully; file count sample:", len(files))
+          print("GOOGLE_DRIVE_API_READ: PASS")
+          print("Drive API list request completed; sample entries:", len(drive.json().get("files", [])))
           PY
 
-      - name: Test Apps Script gateway
+      - name: Test existing Apps Script gateway health
         env:
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
         run: |
           if [ -z "$MMV2_GATEWAY_URL" ]; then
-            echo "MMV2_GATEWAY_URL is missing."
+            echo "MISSING_REQUIRED_SECRET: MMV2_GATEWAY_URL"
             exit 1
           fi
           python - <<'PY'
-          import os, requests
+          import os, requests, sys
 
-          url = os.environ["MMV2_GATEWAY_URL"]
-          r = requests.get(url, params={"action": "health"}, timeout=60)
-          if not r.ok:
-              raise SystemExit(f"Gateway health request failed: HTTP {r.status_code}: {r.text[:500]}")
+          try:
+              response = requests.get(
+                  os.environ["MMV2_GATEWAY_URL"],
+                  params={"action": "health"},
+                  timeout=45,
+              )
+              response.raise_for_status()
+              data = response.json()
+          except Exception as exc:
+              print("APPS_SCRIPT_GATEWAY: FAIL (" + str(exc)[:300] + ")")
+              sys.exit(1)
 
-          data = r.json()
           if not data.get("success") or data.get("status") != "OK":
-              raise SystemExit("Gateway health returned an unexpected response.")
+              print("APPS_SCRIPT_GATEWAY: FAIL (unexpected health response)")
+              sys.exit(1)
 
           print("APPS_SCRIPT_GATEWAY: PASS")
           print("Gateway status:", data.get("status"))
-          print("Gateway version:", data.get("version"))
+          print("Gateway version:", data.get("version", "not reported"))
           PY
