@@ -82,9 +82,36 @@ jobs:
                   f"GOOGLE_DRIVE: FAIL (HTTP {drive.status_code}; {message})"
               )
 
+          headers = {"Authorization": "Bearer " + access_token}
+          created = requests.post(
+              "https://www.googleapis.com/drive/v3/files",
+              headers={**headers, "Content-Type": "application/json"},
+              json={"name": "MMV2-connection-test-temporary", "mimeType": "application/octet-stream"},
+              params={"fields": "id"},
+              timeout=45,
+          )
+          if not created.ok or not created.json().get("id"):
+              try:
+                  body = created.json()
+                  error = body.get("error", {})
+                  message = str(error.get("message", "Drive create test failed"))[:250] if isinstance(error, dict) else "Drive create test failed"
+              except ValueError:
+                  message = "Drive create test failed"
+              raise SystemExit(f"GOOGLE_DRIVE_WRITE: FAIL (HTTP {created.status_code}; {message})")
+
+          temp_id = created.json()["id"]
+          deleted = requests.delete(
+              f"https://www.googleapis.com/drive/v3/files/{temp_id}",
+              headers=headers,
+              timeout=45,
+          )
+          if not deleted.ok:
+              raise SystemExit(f"GOOGLE_DRIVE_DELETE: FAIL (HTTP {deleted.status_code}; temporary test file may remain in Drive)")
+
           print("GOOGLE_OAUTH_REFRESH: PASS")
           print("GOOGLE_DRIVE_API_LIST: PASS")
-          print("Drive API responded successfully. No file names or IDs were printed.")
+          print("GOOGLE_DRIVE_CREATE_DELETE: PASS")
+          print("Drive read/write permissions verified; temporary test file deleted.")
           PY
 
       - name: Test Apps Script gateway health
