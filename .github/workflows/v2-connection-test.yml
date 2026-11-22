@@ -11,21 +11,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Test Google OAuth and Drive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check requests
+
+      - name: Test dedicated V2 Google OAuth and Drive credentials
         env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.MMV2_GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.MMV2_GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: |
           python - <<'PY'
-          import os, requests
+          import os
+          import requests
 
-          required = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"]
-          missing = [k for k in required if not os.environ.get(k)]
+          names = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"]
+          missing = [name for name in names if not os.environ.get(name)]
           if missing:
-              raise SystemExit("Missing GitHub secrets: " + ", ".join(missing))
+              raise SystemExit("Missing V2 repository secrets: " + ", ".join(
+                  "MMV2_GOOGLE_OAUTH_" + {
+                      "GOOGLE_CLIENT_ID": "CLIENT_ID",
+                      "GOOGLE_CLIENT_SECRET": "CLIENT_SECRET",
+                      "GOOGLE_REFRESH_TOKEN": "REFRESH_TOKEN",
+                  }[name] for name in missing
+              ))
 
-          r = requests.post(
+          response = requests.post(
               "https://oauth2.googleapis.com/token",
               data={
                   "client_id": os.environ["GOOGLE_CLIENT_ID"],
@@ -33,31 +47,47 @@ jobs:
                   "refresh_token": os.environ["GOOGLE_REFRESH_TOKEN"],
                   "grant_type": "refresh_token",
               },
-              timeout=60,
+              timeout=45,
           )
-          if not r.ok:
-              raise SystemExit(f"Google token exchange failed: HTTP {r.status_code}: {r.text[:500]}")
+          if not response.ok:
+              try:
+                  body = response.json()
+              except ValueError:
+                  body = {}
+              code = str(body.get("error", "unknown_error"))
+              description = str(body.get("error_description", ""))[:250]
+              raise SystemExit(
+                  f"GOOGLE_OAUTH: FAIL (HTTP {response.status_code}; "
+                  f"error={code}; description={description})"
+              )
 
-          token = r.json().get("access_token")
-          if not token:
-              raise SystemExit("Google token exchange returned no access token.")
+          access_token = response.json().get("access_token")
+          if not access_token:
+              raise SystemExit("GOOGLE_OAUTH: FAIL (no access token in response)")
 
-          d = requests.get(
+          drive = requests.get(
               "https://www.googleapis.com/drive/v3/files",
-              params={"pageSize": 1, "fields": "files(id,name,mimeType)"},
-              headers={"Authorization": "Bearer " + token},
-              timeout=60,
+              params={"pageSize": 1, "fields": "files(id,mimeType)"},
+              headers={"Authorization": "Bearer " + access_token},
+              timeout=45,
           )
-          if not d.ok:
-              raise SystemExit(f"Google Drive API test failed: HTTP {d.status_code}: {d.text[:500]}")
+          if not drive.ok:
+              try:
+                  body = drive.json()
+              except ValueError:
+                  body = {}
+              error = body.get("error", {})
+              message = str(error.get("message", "Drive API request failed"))[:250] if isinstance(error, dict) else "Drive API request failed"
+              raise SystemExit(
+                  f"GOOGLE_DRIVE: FAIL (HTTP {drive.status_code}; {message})"
+              )
 
-          files = d.json().get("files", [])
-          print("GOOGLE_OAUTH: PASS")
-          print("GOOGLE_DRIVE_API: PASS")
-          print("Drive API returned successfully; file count sample:", len(files))
+          print("GOOGLE_OAUTH_REFRESH: PASS")
+          print("GOOGLE_DRIVE_API_LIST: PASS")
+          print("Drive API responded successfully. No file names or IDs were printed.")
           PY
 
-      - name: Test Apps Script gateway
+      - name: Test Apps Script gateway health
         env:
           MMV2_GATEWAY_URL: ${{ secrets.MMV2_GATEWAY_URL }}
         run: |
@@ -66,18 +96,25 @@ jobs:
             exit 1
           fi
           python - <<'PY'
-          import os, requests
+          import os
+          import requests
 
-          url = os.environ["MMV2_GATEWAY_URL"]
-          r = requests.get(url, params={"action": "health"}, timeout=60)
-          if not r.ok:
-              raise SystemExit(f"Gateway health request failed: HTTP {r.status_code}: {r.text[:500]}")
+          response = requests.get(
+              os.environ["MMV2_GATEWAY_URL"],
+              params={"action": "health"},
+              timeout=45,
+          )
+          if not response.ok:
+              raise SystemExit(f"APPS_SCRIPT_GATEWAY: FAIL (HTTP {response.status_code})")
 
-          data = r.json()
+          try:
+              data = response.json()
+          except ValueError:
+              raise SystemExit("APPS_SCRIPT_GATEWAY: FAIL (non-JSON response)")
+
           if not data.get("success") or data.get("status") != "OK":
-              raise SystemExit("Gateway health returned an unexpected response.")
+              raise SystemExit("APPS_SCRIPT_GATEWAY: FAIL (unexpected health response)")
 
           print("APPS_SCRIPT_GATEWAY: PASS")
-          print("Gateway status:", data.get("status"))
-          print("Gateway version:", data.get("version"))
+          print("Gateway version:", data.get("version", "not reported"))
           PY
