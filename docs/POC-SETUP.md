@@ -30,6 +30,14 @@ The V2 workflow uses these exact names:
 
 The three OAuth secrets must belong to the Google OAuth client intended for V2. Do not reuse V1 credentials unless you have explicitly confirmed they are dedicated to this V2 project. GitHub does not reveal existing secret values; create/update them in **Settings → Secrets and variables → Actions**.
 
+## Live recording and demo duration
+
+- The browser live recorder has no application-enforced 40-minute cutoff; users stop recording manually.
+- The standard demonstration meeting should be approximately 30 minutes. Longer recordings are not blocked by a fixed duration setting.
+- The browser records in five-second MediaRecorder slices and retains the slices until the user stops recording. It then assembles the audio and uploads it to Drive using the existing resumable, 1 MiB client upload loop.
+- This is resumable chunked upload **after recording stops**, not continuous upload while the microphone is recording. Very long sessions remain subject to the browser tab's available memory and device stability; keep the tab open until upload completes.
+- Live recording start/end times and measured duration are saved with the meeting record. Pause time is excluded from the recorded duration counter.
+
 ## PoC processing flow
 
 1. Upload or select an audio file in the Apps Script web app.
