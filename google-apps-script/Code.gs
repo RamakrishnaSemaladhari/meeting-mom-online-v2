@@ -23,7 +23,7 @@
  */
 
 const V2 = {
-  VERSION: 'meeting-mom-online-v2-control-tower-2026-10-10-r1',
+  VERSION: 'meeting-mom-online-v2-control-tower-2026-11-22-poc1',
   TIMEZONE: 'Asia/Kolkata',
   SPREADSHEET_ID_PROPERTY: 'MMV2_SPREADSHEET_ID',
   REPO: 'RamakrishnaSemaladhari/meeting-mom-online-v2',
@@ -271,9 +271,9 @@ function secretStatus_() {
     callback_secret:{configured:!!p.getProperty(V2.CALLBACK_SECRET_PROPERTY)},
     google_drive_oauth_required_by_current_workflow:true,
     required_github_action_secrets:[
-      'GOOGLE_CLIENT_ID',
-      'GOOGLE_CLIENT_SECRET',
-      'GOOGLE_REFRESH_TOKEN',
+      'MMV2_GOOGLE_OAUTH_CLIENT_ID',
+      'MMV2_GOOGLE_OAUTH_CLIENT_SECRET',
+      'MMV2_GOOGLE_OAUTH_REFRESH_TOKEN',
       'MMV2_GATEWAY_URL',
       'MMV2_CALLBACK_SECRET'
     ],
@@ -310,9 +310,9 @@ function githubSetupPackage_() {
       callback_secret_property:V2.CALLBACK_SECRET_PROPERTY
     },
     github_actions_secrets:[
-      {name:'GOOGLE_CLIENT_ID',source:'Google Cloud OAuth client',sensitive:true},
-      {name:'GOOGLE_CLIENT_SECRET',source:'Google Cloud OAuth client',sensitive:true},
-      {name:'GOOGLE_REFRESH_TOKEN',source:'Google OAuth user refresh token',sensitive:true},
+      {name:'MMV2_GOOGLE_OAUTH_CLIENT_ID',source:'Google Cloud OAuth client',sensitive:true},
+      {name:'MMV2_GOOGLE_OAUTH_CLIENT_SECRET',source:'Google Cloud OAuth client',sensitive:true},
+      {name:'MMV2_GOOGLE_OAUTH_REFRESH_TOKEN',source:'Google OAuth user refresh token',sensitive:true},
       {name:'MMV2_GATEWAY_URL',source:'New Apps Script /exec URL',sensitive:false},
       {name:'MMV2_CALLBACK_SECRET',source:'Run getGithubCallbackSecret_() in the Apps Script editor',sensitive:true}
     ],
@@ -831,6 +831,63 @@ function startProcessing_(d) {
   logEvent_(meetingId,'GITHUB_DISPATCHED','DISPATCH',5,0,
             'GitHub Actions run queued: '+(gh.run_id||''),'QUEUED',gh.run_id,{});
   return {success:true,meeting_id:meetingId,github:gh,status:'QUEUED',progress_percent:5,context_resolution:{mode:previousContext.mode,reference:previousContext.reference,meetings:previousContext.meetings,message:previousContext.message}};
+}
+
+/**
+ * Controlled PoC path: process an audio file already stored in the configured
+ * Google Drive workspace. Only the Apps Script owner may invoke this operation.
+ */
+function processExistingDriveAudio(input) {
+  input = input || {};
+  const activeEmail = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const ownerEmail = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!activeEmail || !ownerEmail || activeEmail !== ownerEmail) {
+    throw new Error('For security, existing-Drive-file processing is restricted to the Apps Script owner account.');
+  }
+  const raw = clean_(input.drive_url || input.audio_file_id);
+  const match = raw.match(/[A-Za-z0-9_-]{25,}/);
+  if (!match) throw new Error('Paste a valid Google Drive audio-file link or file ID.');
+  const fileId = match[0];
+  const file = DriveApp.getFileById(fileId);
+  const mime = String(file.getMimeType() || '');
+  if (mime.indexOf('audio/') !== 0 && mime !== 'application/octet-stream' && mime !== 'video/mp4') {
+    throw new Error('The selected Drive item is not a recognized audio file. Detected MIME type: ' + mime);
+  }
+  const parents = file.getParents();
+  const audioFolderId = parents.hasNext() ? parents.next().getId() : '';
+  const meetingId = generateMeetingId_();
+  const data = Object.assign({}, input, {
+    meeting_id: meetingId,
+    meeting_title: clean_(input.meeting_title) || file.getName(),
+    audio_file_id: file.getId(),
+    audio_folder_id: audioFolderId,
+    audio_file_size_bytes: file.getSize(),
+    audio_mime_type: mime,
+    processing_mode: 'fresh',
+    context_mode: 'fresh',
+    meeting_initiator: 'Existing Google Drive audio PoC'
+  });
+  const created = createMeeting_(data);
+  if (!created || !created.success) throw new Error('Could not create the meeting record for the Drive audio.');
+  const started = startProcessing_(Object.assign({}, data, {
+    meeting_folder_id: created.meeting_folder_id,
+    processing_folder_id: created.processing_folder_id,
+    reports_folder_id: created.reports_folder_id
+  }));
+  if (!started || !started.success) {
+    throw new Error((started && started.message) || 'Meeting registered but GitHub workflow dispatch failed. Check Meeting History before retrying.');
+  }
+  return {
+    success: true,
+    meeting_id: meetingId,
+    audio_file_id: file.getId(),
+    audio_name: file.getName(),
+    audio_file_size_bytes: file.getSize(),
+    meeting_folder_id: created.meeting_folder_id,
+    github: started.github,
+    status: started.status,
+    context_resolution: started.context_resolution
+  };
 }
 
 function processingEvent_(d) {
