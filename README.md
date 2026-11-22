@@ -22,3 +22,8 @@ Source validation was also exercised after the latest UI change; the validation 
 Validated the UI template escaping after restoring the meeting-type helper.
 
 Source template escape checks are part of the current validation cycle.
+
+
+## PoC setup
+
+See [docs/POC-SETUP.md](docs/POC-SETUP.md) for the Apps Script properties, GitHub Actions secrets, connection test and first-demo checklist. Never commit credentials or Script Property values.
